@@ -1,7 +1,7 @@
 // server.js - 3I/ATLAS Tracker server with background cache
-// Requires: express, node-fetch@2, cheerio, cors
+// Requires: express, cheerio, cors
+// Uses native Node.js fetch (available in Node 18+)
 const express = require('express');
-const fetch = require('node-fetch'); // v2
 const cheerio = require('cheerio');
 const cors = require('cors');
 const path = require('path');
