@@ -1,3 +1,27 @@
+<!--
+3I/ATLAS Tracker — Revised
+This document contains two files (place each into the same folder):
+  1) index.html  -> Front-end tracker (improved error handling and test endpoints)
+  2) server.js   -> Node/Express proxy and scrapers (+ a deterministic /api/test endpoint used for debugging)
+
+Problem fixed:
+  - The client previously assumed all responses were JSON and called `.json()` unconditionally. When the server (or upstream site) returned HTML (an error page or other non-JSON content), `response.json()` threw: "Unexpected token '<'...".
+  - Fix: client now checks response.ok and content-type before calling `.json()`. If non-JSON is returned, the raw text is shown in the UI and a safe fallback object is used.
+  - Added a /api/test endpoint on the server to validate the server is running and returning well-formed JSON.
+
+How to run (minimal):
+  1) Save two files in one folder: index.html and server.js (use the contents below).
+  2) Install dependencies and start server:
+       npm init -y
+       npm install express node-fetch@2 cheerio cors
+       node server.js
+  3) Open http://localhost:3000 in your browser and click "Run diagnostics" to exercise the test endpoint.
+
+Notes:
+  - If you prefer to open index.html directly via file://, set the API root to http://localhost:3000 in the UI (there's a prompt area). However running the server and loading via http is recommended.
+  - When scraping external sites, HTML structure can change; if scraping fails the raw HTML snippet will be shown to help debugging.
+-->
+
 <!doctype html>
 <html lang="en">
 <head>
@@ -37,7 +61,7 @@
     </header>
 
     <div class="controls">
-      <label>API root (leave blank to use same origin): <input id="apiRoot" type="text" placeholder="https://your-render-service.onrender.com" style="width:260px;padding:6px;border-radius:6px;border:1px solid #233243;background:#08101a;color:#dfefff"></label>
+      <label>API root (leave blank to use same origin): <input id="apiRoot" type="text" placeholder="http://localhost:3000" style="width:260px;padding:6px;border-radius:6px;border:1px solid #233243;background:#08101a;color:#dfefff"></label>
       <label>Poll interval (s): <input id="interval" type="number" min="5" value="30"></label>
       <label>Alert mag threshold: <input id="alertMag" type="number" step="0.1" value="9.8"></label>
       <button id="start">Start</button>
@@ -99,17 +123,21 @@ let lastMag = null;
 function getApiRoot(){
   const ui = document.getElementById('apiRoot').value.trim();
   if (ui) return ui.replace(/\/$/,'');
+  // If this page was loaded via http(s), use same origin by default so relative paths work
   if (window.location.protocol.startsWith('http')) return '';
+  // If file://, default to localhost
   return 'http://localhost:3000';
 }
 
 function formatUTC(d){ return new Date(d).toISOString().replace('T',' ').replace('Z',' UTC'); }
 
 async function safeFetchJson(url){
+  // Performs fetch and returns an object: {ok:boolean, status, headers, json?, text?}
   try{
     const resp = await fetch(url, {cache:'no-store'});
     const ct = resp.headers.get('content-type') || '';
     if (!resp.ok){
+      // Attempt to read text to show helpful debug info
       const text = await resp.text();
       return { ok:false, status:resp.status, statusText:resp.statusText, contentType:ct, text };
     }
@@ -122,6 +150,7 @@ async function safeFetchJson(url){
         return { ok:false, status:resp.status, error:'JSON parse error', text };
       }
     }
+    // Not JSON: return raw text so UI can show it
     const text = await resp.text();
     return { ok:true, status:resp.status, contentType:ct, text };
   }catch(err){
@@ -132,30 +161,38 @@ async function safeFetchJson(url){
 async function fetchReadings(){
   const API_ROOT = getApiRoot();
   const urls = {
-    latest: (API_ROOT || '') + '/api/latest',
     theskylive: (API_ROOT || '') + '/api/theskylive?path=/c2025n1-info',
     cobsRecent: (API_ROOT || '') + '/api/cobs?recent=1'
   };
 
   document.getElementById('rawFetch').value = 'Fetching...';
 
-  // Prefer cached /api/latest which will be kept fresh by the server's background job
-  const latestResp = await safeFetchJson(urls.latest);
-  const dbg = { latest: latestResp };
+  // Perform both fetches concurrently but handle each independently
+  const [sResp, cResp] = await Promise.all([safeFetchJson(urls.theskylive), safeFetchJson(urls.cobsRecent)]);
+
+  // Show raw results for debugging
+  const dbg = { theskylive:sResp, cobs:cResp };
   document.getElementById('rawFetch').value = JSON.stringify(dbg, null, 2);
 
+  // Derive chosen reading with safe fallbacks
   let chosen = null;
-  if (latestResp && latestResp.ok && latestResp.json && (latestResp.json.latestMag || latestResp.json.observedMag || latestResp.json.predictedMag)){
-    // Normalize fields into chosen
-    const j = latestResp.json;
-    const mag = j.latestMag ?? j.observedMag ?? j.predictedMag ?? null;
-    if (mag !== null) chosen = { mag: Number(mag), predictedMag: j.predictedMag ?? null, src: j.source || 'server/cache', note: 'cached' };
-  } else {
-    // fallback: try the individual endpoints to get something
-    const [sResp, cResp] = await Promise.all([safeFetchJson(urls.theskylive), safeFetchJson(urls.cobsRecent)]);
-    document.getElementById('rawFetch').value = JSON.stringify({ theskylive:sResp, cobs:cResp }, null, 2);
-    if (cResp && cResp.ok && cResp.json && cResp.json.latestMag) chosen = { mag: Number(cResp.json.latestMag), predictedMag: null, src:'COBS', note:cResp.json.note||'' };
-    else if (sResp && sResp.ok && sResp.json && (sResp.json.observedMag || sResp.json.predictedMag)) chosen = { mag: Number(sResp.json.observedMag ?? sResp.json.predictedMag), predictedMag: sResp.json.predictedMag ?? null, src:'TheSkyLive', note:'' };
+
+  if (cResp && cResp.ok && cResp.json && cResp.json.latestMag){
+    chosen = { mag: Number(cResp.json.latestMag), src:'COBS', note:cResp.json.note || '' };
+  } else if (cResp && cResp.ok && cResp.text){
+    // If COBS returned text, attempt a heuristic parse in-browser as a fallback
+    const m = cResp.text.match(/C\/?\s*2025\s*N1[\s\S]{0,120}?([0-9]{1,2}\.[0-9]{1,2})/i) || cResp.text.match(/([0-9]{1,2}\.[0-9]{1,2})\s*mag/i);
+    if (m) chosen = { mag: Number(m[1]), src:'COBS (inlined parse)', note:'Parsed from raw text' };
+  }
+
+  if (!chosen){
+    if (sResp && sResp.ok && sResp.json){
+      if (sResp.json.observedMag) chosen = { mag: Number(sResp.json.observedMag), src:'TheSkyLive (observed)', note:sResp.json.note||'' };
+      else if (sResp.json.predictedMag) chosen = { mag: Number(sResp.json.predictedMag), src:'TheSkyLive (predicted)', note:sResp.json.note||'' };
+    } else if (sResp && sResp.ok && sResp.text){
+      const m = sResp.text.match(/observed\s+mag(?:nitude)?\D*([0-9]{1,2}\.\d{1,2})/i) || sResp.text.match(/predicted\s+mag(?:nitude)?\D*([0-9]{1,2}\.\d{1,2})/i) || sResp.text.match(/mag[: ]\s*([0-9]{1,2}\.\d{1,2})/i);
+      if (m) chosen = { mag: Number(m[1]), src:'TheSkyLive (inlined parse)', note:'Parsed from raw text' };
+    }
   }
 
   if (chosen){
@@ -220,5 +257,340 @@ document.getElementById('diag').addEventListener('click', async ()=>{
 
 <!-- ========================= server.js (save as server.js in same folder) ========================= -->
 
-<!-- This server implements a background fetch job that refreshes cached readings every REFRESH_INTERVAL_HOURS (env var, default 3). -->
-<!-- Deploy to Render: push repo with these two files, set start command to `node server.js`, and optionally set REFRESH_INTERVAL_HOURS. -->
+<script type="text/plain" id="server-js">
+// Require Node 14+ (CommonJS). This server exposes a deterministic /api/test endpoint
+// and the scraping endpoints. It also serves index.html.
+
+const express = require('express');
+const fetch = require('node-fetch'); // node-fetch v2
+const cheerio = require('cheerio');
+const cors = require('cors');
+const path = require('path');
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+// Serve static files from the folder (index.html must be present)
+app.use(express.static(path.join(__dirname)));
+
+// Deterministic test endpoint to verify server + client JSON handling
+app.get('/api/test', (req,res)=>{
+  res.json({ ok:true, server:'3I-ATLAS-Tracker', timestamp:new Date().toISOString(), note:'This is a test JSON response' });
+});
+
+// TheSkyLive scraping endpoint
+app.get('/api/theskylive', async (req,res)=>{
+  try{
+    const pathParam = req.query.path || '/c2025n1-info';
+    const url = 'https://theskylive.com' + pathParam;
+    const r = await fetch(url, { timeout: 15000 });
+    const text = await r.text();
+    const $ = cheerio.load(text);
+
+    // Heuristic parsing - keep simple and defensive
+    let observedMag = null, predictedMag = null, note = null;
+    const pageText = $('body').text();
+
+    const obs = pageText.match(/observed\s+mag(?:nitude)?\D*([0-9]{1,2}\.\d{1,2})/i) || pageText.match(/observed\s*[:\-]\s*([0-9]{1,2}\.\d{1,2})/i);
+    if (obs) observedMag = parseFloat(obs[1]);
+    const pred = pageText.match(/predicted\s+mag(?:nitude)?\D*([0-9]{1,2}\.\d{1,2})/i) || pageText.match(/predicted\s*[:\-]\s*([0-9]{1,2}\.\d{1,2})/i);
+    if (pred) predictedMag = parseFloat(pred[1]);
+
+    // Return consistent JSON even if parsing yields nulls
+    res.json({ url, observedMag, predictedMag, note, rawSnippet: pageText.slice(0,1200) });
+  } catch(e){
+    res.status(500).json({ error: e.toString() });
+  }
+});
+
+// COBS recent scraping endpoint
+app.get('/api/cobs', async (req,res)=>{
+  try{
+    const url = 'https://cobs.si/recent/';
+    const r = await fetch(url, { timeout: 15000 });
+    const text = await r.text();
+    const $ = cheerio.load(text);
+    const bodyText = $('body').text();
+
+    const cometRe = /C\/?\s*2025\s*N1/gi;
+    const lines = bodyText.split(/\n+/).map(s=>s.trim()).filter(Boolean);
+    let latestMag = null; let note = null;
+    for (let ln of lines){
+      if (cometRe.test(ln)){
+        const m = ln.match(/mag\.?\s*=?\s*([0-9]{1,2}\.\d{1,2})/i) || ln.match(/([0-9]{1,2}\.\d{1,2})/);
+        if (m){ latestMag = parseFloat(m[1]); note = ln.slice(0,300); break; }
+      }
+    }
+
+    res.json({ url, latestMag, note, rawSnippet: bodyText.slice(0,1200) });
+  } catch(e){
+    res.status(500).json({ error: e.toString() });
+  }
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, ()=>console.log('Server running on port',PORT));
+</script>
+
+<!-- ========================= Minimal tests and troubleshooting ========================= -->
+
+1) Start the server and check test endpoint:
+   - curl http://localhost:3000/api/test
+   Expected JSON:
+     { "ok": true, "server": "3I-ATLAS-Tracker", "timestamp": "...", "note": "This is a test JSON response" }
+
+2) Visit http://localhost:3000 in a browser, open developer console, and click "Run diagnostics".
+   - The textarea should display a JSON blob with three entries: test, theskylive, cobs.
+   - Each entry will include either a JSON object (if server returned JSON) or a text snippet (if upstream returned HTML). If the upstream site returned HTML, the raw HTML/text will be included under rawSnippet or text fields so you can debug parsing.
+
+3) If you previously saw the "Unexpected token '<'" error, it should no longer crash the client. Instead you'll now see the raw text returned by the server and a clear diagnostic message.
+
+If you want, I can further harden parsing for the exact HTML layout of theSkyLive and COBS if you paste current raw HTML snippets produced by the diagnostics. Please run the diagnostics and paste the raw output here so I can tailor the parsing selectors.
+
+<!-- End of revised package -->
+
+<!-- ========================= Final automated GH / Render-ready index.html ========================= -->
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>3I / ATLAS Brightness Tracker — Live</title>
+  <style>
+    :root{font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,'Helvetica Neue',Arial;}
+    body{margin:0;background:#071022;color:#e6eef8}
+    .wrap{max-width:1100px;margin:18px auto;padding:18px}
+    .panel{background:linear-gradient(180deg,#071426,#031023);border-radius:14px;padding:18px;box-shadow:0 8px 30px rgba(2,6,23,.6)}
+    header{display:flex;align-items:center;gap:16px}
+    h1{margin:0;font-size:20px}
+    .sub{color:#93aecd;font-size:13px}
+    .topgrid{display:grid;grid-template-columns:320px 1fr;gap:18px;margin-top:18px}
+
+    /* left column */
+    .left{display:flex;flex-direction:column;gap:12px}
+    .bigmag{font-size:54px;font-weight:800;letter-spacing:-1px}
+    .source{font-size:13px;color:#9fb3d2}
+    .magbar{height:12px;background:#021827;border-radius:999px;overflow:hidden}
+    .magbar > i{display:block;height:100%;transition:width 900ms linear;background:linear-gradient(90deg,#ffd166,#ff6b6b)}
+    .delta{font-weight:700;font-size:18px}
+
+    /* history table */
+    table{width:100%;border-collapse:collapse;margin-top:8px}
+    th,td{padding:6px;border-bottom:1px solid rgba(255,255,255,.04);font-size:13px;text-align:left}
+    .history{max-height:360px;overflow:auto}
+
+    /* sparkline */
+    .spark{width:100%;height:80px}
+
+    /* responsive */
+    @media (max-width:880px){ .topgrid{grid-template-columns:1fr} }
+
+    footer{color:#86a6c5;font-size:12px;margin-top:12px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="panel">
+      <header>
+        <div>
+          <h1>3I / ATLAS Brightness Tracker — Live</h1>
+          <div class="sub">Automated — data from <b>TheSkyLive</b> and <b>COBS</b>. Server: <code>https://atlas-c4gn.onrender.com</code></div>
+        </div>
+        <div style="margin-left:auto;text-align:right">
+          <div id="lastUpdated" class="sub">Last update: —</div>
+          <div id="status" class="sub">Status: connecting…</div>
+        </div>
+      </header>
+
+      <div class="topgrid">
+        <div class="left panel" style="padding:14px;">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div>
+              <div class="bigmag" id="currentMag">—</div>
+              <div class="source" id="magSource">—</div>
+            </div>
+            <div style="text-align:right">
+              <div class="delta" id="magDelta">—</div>
+              <div class="source" id="magFactor">—</div>
+            </div>
+          </div>
+
+          <div style="margin-top:12px">
+            <div class="magbar"><i id="magBar" style="width:0%"></i></div>
+            <div style="display:flex;justify-content:space-between;color:#9fb3d2;font-size:13px;margin-top:6px"><div>Bright (0)</div><div>Faint (18+)</div></div>
+          </div>
+
+          <div style="margin-top:14px">
+            <canvas id="spark" class="spark"></canvas>
+          </div>
+
+          <div style="margin-top:14px;font-size:13px;color:#9fb3d2">
+            <div><strong>Interpretation</strong></div>
+            <div>• Lower magnitude → brighter object. • 5 mag = 100× brightness. • Sustained ~9.5–9.8 for two weeks → anomalous.</div>
+          </div>
+        </div>
+
+        <div class="panel" style="padding:14px;">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div><strong>Observations (latest first)</strong></div>
+            <div style="color:#9fb3d2;font-size:13px">Auto-refresh: every 1 hour (client) — server cache refresh configurable</div>
+          </div>
+
+          <div class="history">
+            <table id="historyTable"><thead><tr><th>Time (UTC)</th><th>Source</th><th>Mag</th><th>Pred</th><th>Δ</th><th>Note</th></tr></thead><tbody></tbody></table>
+          </div>
+        </div>
+      </div>
+
+      <footer>Designed for Render deployment. Server: <code>https://atlas-c4gn.onrender.com</code>. Contact for customizations.</footer>
+    </div>
+  </div>
+
+<script>
+// Automated live client for atlas-c4gn.onrender.com
+const API_ROOT = 'https://atlas-c4gn.onrender.com';
+const CLIENT_POLL_SECONDS = 3600; // 1 hour
+const MAX_HISTORY = 500;
+let pollTimer = null;
+let history = []; // {time, src, mag, predicted, note}
+
+function formatUTC(d){ return new Date(d).toISOString().replace('T',' ').replace('Z',' UTC'); }
+
+async function safeFetchJson(url){
+  try{
+    const resp = await fetch(url, { cache:'no-store' });
+    const ct = resp.headers.get('content-type') || '';
+    if (!resp.ok){ const text = await resp.text(); return { ok:false, status:resp.status, text }; }
+    if (ct.includes('application/json') || ct.includes('text/json')){ try{ const json = await resp.json(); return { ok:true, json }; }catch(e){ const text = await resp.text(); return { ok:false, error:'json', text }; } }
+    const text = await resp.text(); return { ok:true, text };
+  }catch(e){ return { ok:false, error:e.toString() }; }
+}
+
+function computeDelta(pred, actual){
+  if (pred==null || actual==null) return null;
+  return pred - actual; // positive => actual brighter
+}
+
+function brightnessFactor(delta){ if (delta==null) return null; return Math.pow(10, delta/2.5); }
+
+function updateUIFromEntry(entry){
+  const magEl = document.getElementById('currentMag');
+  const srcEl = document.getElementById('magSource');
+  const bar = document.getElementById('magBar');
+  const deltaEl = document.getElementById('magDelta');
+  const factorEl = document.getElementById('magFactor');
+
+  magEl.textContent = entry.mag.toFixed(2);
+  srcEl.textContent = entry.src + (entry.note? ' — ' + entry.note : '');
+
+  const clamped = Math.max(0, Math.min(18, entry.mag));
+  const pct = Math.round((18-clamped)/18*100);
+  bar.style.width = pct + '%';
+
+  const delta = computeDelta(entry.predicted, entry.mag);
+  if (delta !== null){
+    const sign = delta>0?'+':(delta<0? '−':'');
+    deltaEl.textContent = sign + Math.abs(delta).toFixed(2);
+    if (delta>0.05) deltaEl.style.color = '#7ef0a3';
+    else if (delta<-0.05) deltaEl.style.color = '#ff9b9b';
+    else deltaEl.style.color = '#9fb3d2';
+
+    const bf = brightnessFactor(delta);
+    factorEl.textContent = (bf?('×'+(bf>=100?Math.round(bf):Math.round(bf*100)/100)):'—') + (delta>0? ' brighter':' fainter');
+  } else { deltaEl.textContent='—'; factorEl.textContent='—'; deltaEl.style.color='#9fb3d2'; }
+}
+
+function renderHistoryTable(){
+  const tbody = document.querySelector('#historyTable tbody');
+  tbody.innerHTML = '';
+  for (let row of history){
+    const tr = document.createElement('tr');
+    const dt = `<td>${formatUTC(row.time)}</td>`;
+    const src = `<td>${row.src}</td>`;
+    const mag = `<td>${row.mag.toFixed(2)}</td>`;
+    const pred = `<td>${row.predicted!==null?row.predicted.toFixed(2):''}</td>`;
+    const delta = (row.predicted!==null)?`<td>${(row.predicted-row.mag>0?'+':'')}${(row.predicted-row.mag).toFixed(2)}</td>`:'<td></td>';
+    const note = `<td>${row.note||''}</td>`;
+    tr.innerHTML = dt+src+mag+pred+delta+note;
+    tbody.appendChild(tr);
+  }
+}
+
+function updateSparkline(){
+  const canvas = document.getElementById('spark');
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width = canvas.clientWidth * devicePixelRatio;
+  const h = canvas.height = canvas.clientHeight * devicePixelRatio;
+  ctx.clearRect(0,0,w,h);
+
+  if (history.length===0) return;
+  // use last 40 points
+  const pts = history.slice(0,40).map(r=>r.mag).reverse();
+  const mins = Math.min(...pts); const maxs = Math.max(...pts);
+  const pad = 8*devicePixelRatio;
+  ctx.lineWidth = 2*devicePixelRatio;
+  ctx.strokeStyle = '#7ec8ff';
+  ctx.beginPath();
+  for (let i=0;i<pts.length;i++){
+    const x = pad + ( (w-2*pad) * (i/(pts.length-1 || 1)) );
+    const y = pad + ( (h-2*pad) * ( (pts[i]-mins) / (maxs-mins || 1) ) );
+    const yInv = h - y; // invert so lower mag (brighter) is higher on canvas
+    if (i===0) ctx.moveTo(x,yInv); else ctx.lineTo(x,yInv);
+  }
+  ctx.stroke();
+  // draw points
+  ctx.fillStyle = '#ffd166';
+  for (let i=0;i<pts.length;i++){
+    const x = pad + ( (w-2*pad) * (i/(pts.length-1 || 1)) );
+    const y = pad + ( (h-2*pad) * ( (pts[i]-mins) / (maxs-mins || 1) ) );
+    const yInv = h - y;
+    ctx.beginPath(); ctx.arc(x,yInv,3*devicePixelRatio,0,Math.PI*2); ctx.fill();
+  }
+}
+
+async function fetchLatest(){
+  document.getElementById('status').textContent = 'Status: fetching…';
+  try{
+    const res = await safeFetchJson(API_ROOT + '/api/latest');
+    if (!res.ok){ document.getElementById('status').textContent = 'Status: fetch failed'; return; }
+    const j = res.json || res;
+    // normalize cache structure: server returns {ok:true, cache: { updated, latestMag, observedMag, predictedMag, source, raw }}
+    const cache = (res.json && res.json.cache) ? res.json.cache : res.json || res;
+    let mag = null; let predicted = null; let src = 'server'; let note = '';
+    if (cache){
+      mag = cache.latestMag ?? cache.observedMag ?? cache.predictedMag ?? null;
+      predicted = cache.predictedMag ?? null;
+      src = cache.source ?? src;
+      note = cache.raw ? (cache.raw.theskylive && cache.raw.theskylive.rawSnippet ? 'parsed' : '') : '';
+    }
+    if (mag===null){ document.getElementById('status').textContent = 'Status: no data'; return; }
+
+    const entry = { time: new Date(), src, mag: Number(mag), predicted: predicted!==null?Number(predicted):null, note };
+
+    // push to head of history
+    history.unshift(entry);
+    if (history.length>MAX_HISTORY) history.pop();
+
+    renderHistoryTable();
+    updateUIFromEntry(entry);
+    updateSparkline();
+
+    document.getElementById('lastUpdated').textContent = 'Last update: ' + formatUTC(new Date(cache.updated||Date.now()));
+    document.getElementById('status').textContent = 'Status: OK';
+  }catch(e){ document.getElementById('status').textContent = 'Status: error'; console.error(e); }
+}
+
+// start automatic polling
+(async function(){
+  // immediate fetch
+  await fetchLatest();
+  // then schedule
+  pollTimer = setInterval(fetchLatest, CLIENT_POLL_SECONDS * 1000);
+})();
+</script>
+</body>
+</html>
+
+<!-- End automated index.html -->
