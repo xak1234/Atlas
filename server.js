@@ -17,11 +17,12 @@ let cache = {
   latestMag: null,
   observedMag: null,
   predictedMag: null,
+  distanceKm: null,
   source: null,
   raw: {}
 };
 
-const REFRESH_INTERVAL_HOURS = Number(process.env.REFRESH_INTERVAL_HOURS || 3); // default every 3 hours
+const REFRESH_INTERVAL_HOURS = Number(process.env.REFRESH_INTERVAL_HOURS || 6); // default every 6 hours
 const REFRESH_INTERVAL_MS = Math.max(60, REFRESH_INTERVAL_HOURS * 3600) * 1000; // ensure at least 60s
 
 // Helper to fetch and parse TheSkyLive for /c2025n1-info
@@ -34,7 +35,10 @@ async function fetchTheSkyLive(){
     const pageText = $('body').text();
     const obs = pageText.match(/observed\s+mag(?:nitude)?\D*([0-9]{1,2}\.\d{1,2})/i) || pageText.match(/observed\s*[:\-]\s*([0-9]{1,2}\.\d{1,2})/i);
     const pred = pageText.match(/predicted\s+mag(?:nitude)?\D*([0-9]{1,2}\.\d{1,2})/i) || pageText.match(/predicted\s*[:\-]\s*([0-9]{1,2}\.\d{1,2})/i);
-    return { url, rawSnippet: pageText.slice(0,1200), observedMag: obs?parseFloat(obs[1]):null, predictedMag: pred?parseFloat(pred[1]):null };
+    // Extract distance to Earth (in km) - look for patterns like "123,456 km" or "123456 km"
+    const dist = pageText.match(/distance(?:\s+to\s+)?(?:earth)?[\s\D]*([0-9]{1,10}(?:,?[0-9]{3})*)\s*km/i);
+    const distanceKm = dist ? parseFloat(dist[1].replace(/,/g, '')) : null;
+    return { url, rawSnippet: pageText.slice(0,1200), observedMag: obs?parseFloat(obs[1]):null, predictedMag: pred?parseFloat(pred[1]):null, distanceKm };
   }catch(e){
     return { url, error: e.toString() };
   }
@@ -74,6 +78,7 @@ async function refreshCache(){
     cache.latestMag = cobs && cobs.latestMag ? cobs.latestMag : (ts && ts.observedMag ? ts.observedMag : (ts && ts.predictedMag ? ts.predictedMag : null));
     cache.observedMag = ts && ts.observedMag ? ts.observedMag : null;
     cache.predictedMag = ts && ts.predictedMag ? ts.predictedMag : null;
+    cache.distanceKm = ts && ts.distanceKm ? ts.distanceKm : null;
     cache.source = cobs && cobs.latestMag ? 'COBS' : (ts && ts.observedMag ? 'TheSkyLive(observed)' : (ts && ts.predictedMag ? 'TheSkyLive(predicted)' : 'none'));
     console.log('Cache updated:', cache);
   }catch(e){
@@ -96,6 +101,12 @@ app.get('/api/test', (req,res)=>{
 // Return cached/latest reading
 app.get('/api/latest', (req,res)=>{
   res.json({ ok:true, cache });
+});
+
+// Quick distance endpoint (fetches fresh without waiting for cache)
+app.get('/api/distance', async (req,res)=>{
+  const result = await fetchTheSkyLive();
+  res.json({ ok:true, distanceKm: result.distanceKm, timestamp: new Date().toISOString() });
 });
 
 // Individual scraping endpoints for diagnostics (also update cache if immediate fetch needed)
