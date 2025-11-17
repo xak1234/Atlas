@@ -19,11 +19,14 @@ let cache = {
   predictedMag: null,
   distanceKm: null,
   source: null,
+  magStatus: 'normal', // 'normal' or 'abnormal'
+  previousMag: null,
   raw: {}
 };
 
 const REFRESH_INTERVAL_HOURS = Number(process.env.REFRESH_INTERVAL_HOURS || 6); // default every 6 hours
 const REFRESH_INTERVAL_MS = Math.max(60, REFRESH_INTERVAL_HOURS * 3600) * 1000; // ensure at least 60s
+const DISTANCE_REFRESH_SECONDS = 10; // refresh distance every 10 seconds
 
 // Helper to fetch and parse TheSkyLive for /c2025n1-info
 async function fetchTheSkyLive(){
@@ -35,8 +38,8 @@ async function fetchTheSkyLive(){
     const pageText = $('body').text();
     const obs = pageText.match(/observed\s+mag(?:nitude)?\D*([0-9]{1,2}\.\d{1,2})/i) || pageText.match(/observed\s*[:\-]\s*([0-9]{1,2}\.\d{1,2})/i);
     const pred = pageText.match(/predicted\s+mag(?:nitude)?\D*([0-9]{1,2}\.\d{1,2})/i) || pageText.match(/predicted\s*[:\-]\s*([0-9]{1,2}\.\d{1,2})/i);
-    // Extract distance to Earth (in km) - look for patterns like "123,456 km" or "123456 km"
-    const dist = pageText.match(/distance(?:\s+to\s+)?(?:earth)?[\s\D]*([0-9]{1,10}(?:,?[0-9]{3})*)\s*km/i);
+    // Extract distance to Earth (in km) - look for patterns like "310,769,103.3 kilometers" or "123,456 km"
+    const dist = pageText.match(/distance(?:\s+to\s+)?(?:earth)?[\s\D]*([0-9]{1,10}(?:,?[0-9]{3})*(?:\.\d+)?)\s*(?:km|kilometers)/i);
     const distanceKm = dist ? parseFloat(dist[1].replace(/,/g, '')) : null;
     return { url, rawSnippet: pageText.slice(0,1200), observedMag: obs?parseFloat(obs[1]):null, predictedMag: pred?parseFloat(pred[1]):null, distanceKm };
   }catch(e){
@@ -80,17 +83,45 @@ async function refreshCache(){
     cache.predictedMag = ts && ts.predictedMag ? ts.predictedMag : null;
     cache.distanceKm = ts && ts.distanceKm ? ts.distanceKm : null;
     cache.source = cobs && cobs.latestMag ? 'COBS' : (ts && ts.observedMag ? 'TheSkyLive(observed)' : (ts && ts.predictedMag ? 'TheSkyLive(predicted)' : 'none'));
+    
+    // Detect abnormal brightness: comet should get fainter (higher mag) as it recedes
+    // If current magnitude is significantly brighter (lower) than previous, it's abnormal
+    if(cache.previousMag !== null && cache.latestMag !== null){
+      const magDiff = cache.previousMag - cache.latestMag; // positive = got brighter (abnormal)
+      cache.magStatus = (magDiff > 0.3) ? 'abnormal' : 'normal'; // threshold: 0.3 magnitude units brighter
+      console.log(`Magnitude changed by ${magDiff.toFixed(2)} (${cache.previousMag.toFixed(2)} → ${cache.latestMag.toFixed(2)}): ${cache.magStatus}`);
+    } else {
+      cache.magStatus = 'normal';
+    }
+    cache.previousMag = cache.latestMag;
+    
     console.log('Cache updated:', cache);
   }catch(e){
     console.error('refreshCache failed', e);
   }
 }
 
-// Start background refresh loop
-(async function startRefreshLoop(){
+// Separate refresh job for distance only (runs more frequently)
+async function refreshDistance(){
+  try{
+    const ts = await fetchTheSkyLive();
+    if(ts.distanceKm){
+      cache.distanceKm = ts.distanceKm;
+      console.log('Distance updated:', cache.distanceKm, 'km');
+    }
+  }catch(e){
+    console.error('refreshDistance failed', e);
+  }
+}
+
+// Start background refresh loops
+(async function startRefreshLoops(){
   // initial refresh at startup
   await refreshCache();
+  // then schedule magnitude cache (every 6 hours)
   setInterval(refreshCache, REFRESH_INTERVAL_MS);
+  // and schedule distance refresh (every 10 seconds)
+  setInterval(refreshDistance, DISTANCE_REFRESH_SECONDS * 1000);
 })();
 
 // Endpoints
