@@ -1,7 +1,7 @@
 {
   "name": "3i-atlas-tracker",
   "version": "1.0.0",
-  "description": "3I/ATLAS Brightness Tracker - Live comet tracking with TheSkyLive and COBS data",
+  "description": "3I/ATLAS Tracker - Live spaceship tracking with TheSkyLive and COBS data",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
