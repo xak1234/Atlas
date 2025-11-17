@@ -154,6 +154,46 @@
       margin-top: 4px;
     }
 
+    .starmap-section {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-bottom: 20px;
+    }
+    .contact-section {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      background: rgba(126, 200, 255, 0.08);
+      border-radius: 8px;
+      border: 1px solid rgba(126, 200, 255, 0.15);
+    }
+    .days-label {
+      font-size: 11px;
+      color: #9fb3d2;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+    }
+    .days-to-contact {
+      font-size: 32px;
+      font-weight: 700;
+      color: #7ef0a3;
+      margin-bottom: 12px;
+      text-align: center;
+    }
+    .contact-canvas-container {
+      width: 100%;
+      display: flex;
+      justify-content: center;
+      padding: 0;
+    }
+    .contact-canvas-container canvas {
+      max-width: 100%;
+      height: auto;
+    }
     .observations {
       display: flex;
       flex-direction: column;
@@ -215,7 +255,7 @@
     <div class="card">
       <header>
         <div class="header-left">
-          <h1>3I / ATLAS Brightness Tracker — Live</h1>
+          <h1>3I / ATLAS Unknown - Tracking — Live</h1>
           <div class="sub">Automated — data from <b>TheSkyLive</b> and <b>COBS</b>. Server: <code>https://atlas-c4gn.onrender.com</code></div>
         </div>
         <div class="header-right">
@@ -242,6 +282,22 @@
             <div class="distance-label" style="margin-top: 4px;">km</div>
           </div>
         </div>
+
+      <div class="starmap-section">
+        <div class="contact-section">
+          <div class="days-label">Days to Contact</div>
+          <div class="days-to-contact" id="daysToContact">—</div>
+          <div class="contact-canvas-container">
+            <canvas id="contactCanvas" width="220" height="100"></canvas>
+          </div>
+        </div>
+        <div class="contact-section">
+          <div class="days-label">Distance Tracking</div>
+          <div class="contact-canvas-container">
+            <canvas id="trackingCanvas" width="220" height="200"></canvas>
+          </div>
+        </div>
+      </div>
 
         <div class="observations">
           <h3>Observations (latest first)</h3>
@@ -272,11 +328,22 @@
 // Live client for atlas-c4gn.onrender.com
 const API_ROOT = 'https://atlas-c4gn.onrender.com';
 const CLIENT_POLL_SECONDS = 21600; // 6 hours
-const DISTANCE_POLL_SECONDS = 10; // 10 seconds
+const DISTANCE_POLL_SECONDS = 60; // Check real distance every 60 seconds
+const DISTANCE_DISPLAY_INTERVAL = 1000; // Update display every 1 second (interpolated)
 const MAX_HISTORY = 100;
 let pollTimer = null;
 let distanceTimer = null;
+let distanceDisplayTimer = null;
 let history = [];
+
+// Distance tracking for smooth interpolation
+let distanceState = {
+  lastRealDistance: null,
+  lastRealDistanceTime: null,
+  currentDisplayDistance: null,
+  velocityKmPerSecond: 8.1, // km/s (positive = approaching Earth, ~700k km per day)
+  trajectoryPoints: [] // Array of {time, distance} for graphing
+};
 
 function formatUTC(d) {
   return new Date(d).toISOString().replace('T', ' ').replace('Z', ' UTC');
@@ -329,6 +396,188 @@ function updateUIFromEntry(entry) {
   bar.style.width = pct + '%';
 }
 
+function drawContactVisualization(distanceKm) {
+  const canvas = document.getElementById('contactCanvas');
+  if (!canvas) return;
+  
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  
+  // Calculate days to contact based on ACTUAL velocity from distance tracking
+  const SECONDS_PER_DAY = 86400;
+  // Use the actual velocity from distanceState, or default to 8.1 km/s
+  const actualVelocity = distanceState.velocityKmPerSecond || 8.1;
+  const totalSeconds = (distanceKm || 0) / actualVelocity;
+  const daysToContact = totalSeconds / SECONDS_PER_DAY;
+  
+  // Update the days display
+  const daysEl = document.getElementById('daysToContact');
+  if (daysToContact > 0 && isFinite(daysToContact)) {
+    daysEl.textContent = daysToContact.toFixed(1).toLocaleString();
+  } else {
+    daysEl.textContent = '—';
+  }
+  
+  // Draw visualization
+  const centerY = canvas.height / 2;
+  
+  // Draw Earth (green circle on the right)
+  ctx.fillStyle = '#7ef0a3';
+  ctx.beginPath();
+  ctx.arc(180, centerY, 18, 0, Math.PI * 2);
+  ctx.fill();
+  
+  // Draw Earth outline
+  ctx.strokeStyle = '#7ef0a3';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  
+  // Draw simple Earth details (continents)
+  ctx.fillStyle = '#05a84a';
+  ctx.beginPath();
+  ctx.arc(185, centerY - 5, 4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(175, centerY + 6, 3, 0, Math.PI * 2);
+  ctx.fill();
+  
+  // Draw spaceship (red triangle pointing right toward Earth)
+  const shipX = 30;
+  ctx.fillStyle = '#ff6b6b';
+  ctx.beginPath();
+  ctx.moveTo(shipX + 12, centerY); // point facing right
+  ctx.lineTo(shipX - 8, centerY - 8);
+  ctx.lineTo(shipX - 8, centerY + 8);
+  ctx.closePath();
+  ctx.fill();
+  
+  // Draw line from ship to Earth
+  ctx.strokeStyle = 'rgba(255, 107, 107, 0.5)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath();
+  ctx.moveTo(shipX + 12, centerY);
+  ctx.lineTo(180 - 18, centerY);
+  ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+function drawTrackingVisualization(distanceKm) {
+  const canvas = document.getElementById('trackingCanvas');
+  if (!canvas) return;
+  
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  
+  const centerX = canvas.width / 2;
+  const centerY = canvas.height / 2;
+  
+  // Background
+  ctx.fillStyle = '#08101a';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  
+  // Draw orbital path (arc from comet to Earth)
+  ctx.strokeStyle = 'rgba(126, 200, 255, 0.2)';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([5, 5]);
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, 100, -Math.PI * 0.3, Math.PI * 0.3, false);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  
+  // Calculate progress toward Earth (0 = start at 310M km, 1 = Earth at 0 km)
+  const startDistance = 310000000; // ~310M km
+  const endDistance = 269000000;   // ~269M km (closest approach)
+  const progress = (startDistance - distanceKm) / (startDistance - endDistance);
+  const clampedProgress = Math.max(0, Math.min(1, progress));
+  
+  // Calculate comet position on the arc
+  const angle = -Math.PI * 0.3 + (Math.PI * 0.6) * clampedProgress;
+  const cometRadius = 100 - clampedProgress * 70; // Moves closer to Earth
+  const cometX = centerX + Math.cos(angle) * cometRadius;
+  const cometY = centerY + Math.sin(angle) * cometRadius;
+  
+  // Draw Sun (yellow circle in upper left)
+  ctx.fillStyle = '#FFB81C';
+  ctx.shadowColor = 'rgba(255, 184, 28, 0.5)';
+  ctx.shadowBlur = 20;
+  ctx.beginPath();
+  ctx.arc(centerX - 120, centerY - 80, 15, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.shadowColor = 'transparent';
+  ctx.fillStyle = '#9fb3d2';
+  ctx.font = '11px system-ui';
+  ctx.textAlign = 'center';
+  ctx.fillText('Sun', centerX - 120, centerY - 60);
+  
+  // Draw Earth (blue circle on the right)
+  ctx.fillStyle = '#4A9EE8';
+  ctx.shadowColor = 'rgba(74, 158, 232, 0.5)';
+  ctx.shadowBlur = 15;
+  ctx.beginPath();
+  ctx.arc(centerX + 100, centerY, 12, 0, Math.PI * 2);
+  ctx.fill();
+  
+  // Draw Earth details (continents)
+  ctx.fillStyle = '#2E7D3F';
+  ctx.beginPath();
+  ctx.arc(centerX + 102, centerY - 4, 3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(centerX + 96, centerY + 3, 2.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.shadowColor = 'transparent';
+  
+  ctx.fillStyle = '#9fb3d2';
+  ctx.textAlign = 'center';
+  ctx.fillText('Earth', centerX + 100, centerY + 28);
+  
+  // Draw comet (white/cyan glowing sphere with tail)
+  ctx.fillStyle = '#7ef0a3';
+  ctx.shadowColor = 'rgba(126, 240, 163, 0.6)';
+  ctx.shadowBlur = 15;
+  ctx.beginPath();
+  ctx.arc(cometX, cometY, 8, 0, Math.PI * 2);
+  ctx.fill();
+  
+  // Draw comet tail (pointing away from sun)
+  const tailAngle = Math.atan2(cometY - (centerY - 80), cometX - (centerX - 120));
+  const tailStartX = cometX + Math.cos(tailAngle) * 8;
+  const tailStartY = cometY + Math.sin(tailAngle) * 8;
+  const tailEndX = cometX + Math.cos(tailAngle) * 35;
+  const tailEndY = cometY + Math.sin(tailAngle) * 35;
+  
+  ctx.strokeStyle = 'rgba(126, 240, 163, 0.4)';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(tailStartX, tailStartY);
+  ctx.lineTo(tailEndX, tailEndY);
+  ctx.stroke();
+  ctx.shadowColor = 'transparent';
+  
+  // Draw dashed line from comet to Earth
+  ctx.strokeStyle = 'rgba(255, 107, 107, 0.4)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([3, 3]);
+  ctx.beginPath();
+  ctx.moveTo(cometX, cometY);
+  ctx.lineTo(centerX + 100, centerY);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  
+  // Draw distance label
+  ctx.fillStyle = '#ffd166';
+  ctx.font = 'bold 12px system-ui';
+  ctx.textAlign = 'center';
+  ctx.fillText(distanceKm.toLocaleString('en-US', { maximumFractionDigits: 0 }) + ' km', centerX, 30);
+  
+  // Draw "sky movement" label
+  ctx.fillStyle = '#9fb3d2';
+  ctx.font = '10px system-ui';
+  ctx.textAlign = 'center';
+  ctx.fillText('orbital trajectory', centerX, canvas.height - 15);
+}
+
 function renderHistoryTable() {
   const tbody = document.querySelector('#historyTable tbody');
   tbody.innerHTML = '';
@@ -347,13 +596,66 @@ async function fetchDistance() {
   try {
     const res = await safeFetchJson(API_ROOT + '/api/distance');
     if (res.ok && res.json && res.json.distanceKm !== null) {
-      const distEl = document.getElementById('distanceValue');
-      const km = res.json.distanceKm;
-      distEl.textContent = km.toLocaleString('en-US', { maximumFractionDigits: 0 });
+      const newDistance = res.json.distanceKm;
+      const now = Date.now();
+      
+      // Add to trajectory points for graphing
+      distanceState.trajectoryPoints.push({ time: now, distance: newDistance });
+      
+      // Keep only last 2 hours of data (120 minutes)
+      const twoHoursMs = 2 * 60 * 60 * 1000;
+      distanceState.trajectoryPoints = distanceState.trajectoryPoints.filter(
+        point => now - point.time < twoHoursMs
+      );
+      
+      // Calculate velocity if we have a previous reading
+      if (distanceState.lastRealDistance !== null && distanceState.lastRealDistanceTime !== null) {
+        const timeDiffSeconds = (now - distanceState.lastRealDistanceTime) / 1000;
+        const distanceDiffKm = distanceState.lastRealDistance - newDistance; // Positive if approaching
+        if (timeDiffSeconds > 0) {
+          distanceState.velocityKmPerSecond = distanceDiffKm / timeDiffSeconds;
+          console.log(`Distance updated: ${newDistance.toLocaleString()} km | Velocity: ${distanceState.velocityKmPerSecond.toFixed(2)} km/s | Time since last fetch: ${timeDiffSeconds.toFixed(1)}s`);
+        }
+      } else {
+        console.log(`Initial distance: ${newDistance.toLocaleString()} km`);
+      }
+      
+      // Update the state with new real distance
+      distanceState.lastRealDistance = newDistance;
+      distanceState.lastRealDistanceTime = now;
+      distanceState.currentDisplayDistance = newDistance;
+      
+      // Update display immediately with the new real distance
+      updateDistanceDisplay(newDistance);
     }
   } catch (e) {
     console.error('Distance fetch failed:', e);
   }
+}
+
+function updateDistanceDisplay(distanceKm) {
+  const distEl = document.getElementById('distanceValue');
+  distEl.textContent = distanceKm.toLocaleString('en-US', { maximumFractionDigits: 0 });
+  // Update the visualizations with the new distance
+  drawContactVisualization(distanceKm);
+  drawTrackingVisualization(distanceKm);
+}
+
+function interpolateDistance() {
+  if (distanceState.lastRealDistanceTime === null) {
+    return;
+  }
+  
+  const now = Date.now();
+  const timeSinceLastFetchSeconds = (now - distanceState.lastRealDistanceTime) / 1000;
+  
+  // Calculate interpolated distance based on velocity
+  const distanceChange = distanceState.velocityKmPerSecond * timeSinceLastFetchSeconds;
+  const interpolatedDistance = distanceState.lastRealDistance - distanceChange;
+  
+  // Update display with interpolated value
+  distanceState.currentDisplayDistance = interpolatedDistance;
+  updateDistanceDisplay(interpolatedDistance);
 }
 
 async function fetchLatest() {
@@ -391,6 +693,9 @@ async function fetchLatest() {
     renderHistoryTable();
     updateUIFromEntry(entry);
 
+    renderHistoryTable();
+    updateUIFromEntry(entry);
+
     document.getElementById('lastUpdated').textContent = 'Last update: ' + formatUTC(new Date(cache.updated || Date.now()));
     document.getElementById('status').textContent = 'Status: OK';
   } catch (e) {
@@ -404,9 +709,11 @@ async function fetchLatest() {
   // immediate fetch on page load
   await fetchLatest();
   await fetchDistance();
-  // then schedule for magnitude (every 6 hours) and distance (every 10 seconds)
+  // then schedule for magnitude (every 6 hours) and distance (every 60 seconds for real data)
   pollTimer = setInterval(fetchLatest, CLIENT_POLL_SECONDS * 1000);
   distanceTimer = setInterval(fetchDistance, DISTANCE_POLL_SECONDS * 1000);
+  // Interpolate distance display every second
+  distanceDisplayTimer = setInterval(interpolateDistance, DISTANCE_DISPLAY_INTERVAL);
 })();
 </script>
 </body>
