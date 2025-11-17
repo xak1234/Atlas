@@ -1,210 +1,294 @@
-<!--
-3I/ATLAS Tracker — Revised
-This document contains two files (place each into the same folder):
-  1) index.html  -> Front-end tracker (improved error handling and test endpoints)
-  2) server.js   -> Node/Express proxy and scrapers (+ a deterministic /api/test endpoint used for debugging)
-
-Problem fixed:
-  - The client previously assumed all responses were JSON and called `.json()` unconditionally. When the server (or upstream site) returned HTML (an error page or other non-JSON content), `response.json()` threw: "Unexpected token '<'...".
-  - Fix: client now checks response.ok and content-type before calling `.json()`. If non-JSON is returned, the raw text is shown in the UI and a safe fallback object is used.
-  - Added a /api/test endpoint on the server to validate the server is running and returning well-formed JSON.
-
-How to run (minimal):
-  1) Save two files in one folder: index.html and server.js (use the contents below).
-  2) Install dependencies and start server:
-       npm init -y
-       npm install express node-fetch@2 cheerio cors
-       node server.js
-  3) Open http://localhost:3000 in your browser and click "Run diagnostics" to exercise the test endpoint.
-
-Notes:
-  - If you prefer to open index.html directly via file://, set the API root to http://localhost:3000 in the UI (there's a prompt area). However running the server and loading via http is recommended.
-  - When scraping external sites, HTML structure can change; if scraping fails the raw HTML snippet will be shown to help debugging.
--->
-
 <!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>3I / ATLAS Brightness Tracker — Revised</title>
+  <title>3I / ATLAS Brightness Tracker — Live</title>
   <style>
-    :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,'Helvetica Neue',Arial;}
-    body{margin:0;padding:18px;background:#08101a;color:#e6eef8}
-    .card{background:linear-gradient(180deg,#0f1b2a, #071023);border-radius:12px;padding:16px;box-shadow:0 6px 18px rgba(0,0,0,.6);}
-    header{display:flex;gap:12px;align-items:center}
-    h1{margin:0;font-size:18px}
-    .controls{margin-top:12px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
-    input[type=number]{width:90px;padding:6px;border-radius:6px;border:1px solid #233243;background:#08101a;color:#dfefff}
-    button{padding:8px 12px;border-radius:8px;border:0;background:#1f6feb;color:white;cursor:pointer}
-    .grid{display:grid;grid-template-columns:320px 1fr;gap:16px;margin-top:16px}
-    .gauge{display:flex;flex-direction:column;gap:8px;align-items:center}
-    .magnitude{font-size:40px;font-weight:700}
-    .status{font-size:12px;color:#9fb3d2}
-    table{width:100%;border-collapse:collapse;margin-top:8px}
-    th,td{padding:6px;border-bottom:1px solid rgba(255,255,255,.04);text-align:left;font-size:13px}
-    .history{max-height:360px;overflow:auto}
-    .anomaly{background:linear-gradient(90deg,rgba(255,97,97,.08),transparent);}
-    footer{margin-top:12px;font-size:12px;color:#96a9c7}
-    .muted{color:#8fa6c6;font-size:13px}
-    .row{display:flex;gap:8px;align-items:center}
-    textarea{width:100%;height:160px;background:#051223;color:#9fb3d2;border-radius:6px;padding:8px;border:1px solid #123;}
+    :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, 'Helvetica Neue', Arial; }
+    body {
+      margin: 0;
+      padding: 24px;
+      background: #08101a;
+      color: #e6eef8;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+    }
+    .container {
+      max-width: 900px;
+      width: 100%;
+    }
+    .card {
+      background: linear-gradient(180deg, #0f1b2a, #071023);
+      border-radius: 12px;
+      padding: 28px;
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.6);
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      margin-bottom: 28px;
+    }
+    .header-left h1 {
+      margin: 0;
+      font-size: 20px;
+      font-weight: 600;
+    }
+    .header-left .sub {
+      color: #93aecd;
+      font-size: 12px;
+      margin-top: 4px;
+    }
+    .header-left .sub code {
+      background: rgba(255, 255, 255, 0.05);
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-size: 11px;
+    }
+    .header-right {
+      text-align: right;
+    }
+    .header-right > div {
+      color: #93aecd;
+      font-size: 12px;
+      line-height: 1.6;
+    }
+    .status {
+      color: #7ec8ff;
+    }
+
+    .content {
+      display: grid;
+      grid-template-columns: 1fr 2fr;
+      gap: 24px;
+    }
+
+    .magnitude-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      background: rgba(126, 200, 255, 0.08);
+      border-radius: 8px;
+      border: 1px solid rgba(126, 200, 255, 0.15);
+    }
+    .big-mag {
+      font-size: 64px;
+      font-weight: 800;
+      letter-spacing: -2px;
+      line-height: 1;
+    }
+    .mag-source {
+      font-size: 13px;
+      color: #9fb3d2;
+      margin-top: 8px;
+      text-align: center;
+    }
+    .mag-bar {
+      width: 100%;
+      height: 8px;
+      background: #021827;
+      border-radius: 999px;
+      overflow: hidden;
+      margin-top: 12px;
+    }
+    .mag-bar > i {
+      display: block;
+      height: 100%;
+      width: 0%;
+      transition: width 0.6s linear;
+      background: linear-gradient(90deg, #ffd166, #ff6b6b);
+    }
+    .mag-scale {
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      color: #9fb3d2;
+      font-size: 11px;
+      margin-top: 6px;
+    }
+
+    .distance-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      background: rgba(126, 200, 255, 0.08);
+      border-radius: 8px;
+      border: 1px solid rgba(126, 200, 255, 0.15);
+      margin-top: 12px;
+    }
+    .distance-label {
+      font-size: 11px;
+      color: #9fb3d2;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .distance-value {
+      font-size: 24px;
+      font-weight: 700;
+      color: #ffd166;
+      margin-top: 4px;
+    }
+
+    .observations {
+      display: flex;
+      flex-direction: column;
+    }
+    .observations h3 {
+      margin: 0 0 8px 0;
+      font-size: 14px;
+    }
+    .observations .sub {
+      color: #9fb3d2;
+      font-size: 12px;
+      margin-bottom: 12px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    th, td {
+      padding: 8px;
+      text-align: left;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    }
+    th {
+      font-weight: 600;
+      color: #9fb3d2;
+      background: rgba(255, 255, 255, 0.02);
+    }
+    .history-table {
+      max-height: 320px;
+      overflow-y: auto;
+    }
+
+    footer {
+      margin-top: 20px;
+      padding-top: 16px;
+      border-top: 1px solid rgba(255, 255, 255, 0.04);
+      font-size: 11px;
+      color: #86a6c5;
+    }
+    footer code {
+      background: rgba(255, 255, 255, 0.05);
+      padding: 2px 6px;
+      border-radius: 3px;
+    }
+
+    @media (max-width: 720px) {
+      .content {
+        grid-template-columns: 1fr;
+      }
+      body {
+        padding: 16px;
+      }
+    }
   </style>
 </head>
 <body>
-  <div class="card" id="app">
-    <header>
-      <div>
-        <h1>3I / ATLAS Brightness Tracker — Revised</h1>
-        <div class="status muted">Sources: TheSkyLive (predicted + observed) • COBS recent amateur reports</div>
-      </div>
-    </header>
+  <div class="container">
+    <div class="card">
+      <header>
+        <div class="header-left">
+          <h1>3I / ATLAS Brightness Tracker — Live</h1>
+          <div class="sub">Automated — data from <b>TheSkyLive</b> and <b>COBS</b>. Server: <code>https://atlas-c4gn.onrender.com</code></div>
+        </div>
+        <div class="header-right">
+          <div id="lastUpdated">Last update: —</div>
+          <div id="status" class="status">Status: connecting…</div>
+        </div>
+      </header>
 
-    <div class="controls">
-      <label>API root (leave blank to use same origin): <input id="apiRoot" type="text" placeholder="http://localhost:3000" style="width:260px;padding:6px;border-radius:6px;border:1px solid #233243;background:#08101a;color:#dfefff"></label>
-      <label>Poll interval (s): <input id="interval" type="number" min="5" value="30"></label>
-      <label>Alert mag threshold: <input id="alertMag" type="number" step="0.1" value="9.8"></label>
-      <button id="start">Start</button>
-      <button id="stop">Stop</button>
-      <button id="diag">Run diagnostics</button>
-      <div id="lastUpdated" style="margin-left:12px;font-size:13px;color:#9fb3d2">Not started</div>
+      <div class="content">
+        <div class="magnitude-card">
+          <div class="big-mag" id="currentMag">—</div>
+          <div class="mag-source" id="magSource">—</div>
+          <div class="mag-bar">
+            <i id="magBar" style="width: 0%"></i>
+          </div>
+          <div class="mag-scale">
+            <div>Bright (0)</div>
+            <div>Faint (18+)</div>
+          </div>
+          <div class="distance-card">
+            <div class="distance-label">Distance to Earth</div>
+            <div class="distance-value" id="distanceValue">—</div>
+            <div class="distance-label" style="margin-top: 4px;">km</div>
+          </div>
+        </div>
+
+        <div class="observations">
+          <h3>Observations (latest first)</h3>
+          <div class="sub">Auto-refresh: every 6 hours</div>
+          <div class="history-table">
+            <table id="historyTable">
+              <thead>
+                <tr>
+                  <th>Time (UTC)</th>
+                  <th>Source</th>
+                  <th>Mag</th>
+                  <th>Note</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <footer>
+        Designed for Render deployment. Server: <code>https://atlas-c4gn.onrender.com</code>. Contact for customizations.
+      </footer>
     </div>
-
-    <div class="grid">
-      <div class="gauge card" style="padding:12px;">
-        <div style="text-align:center">
-          <div class="magnitude" id="currentMag">—</div>
-          <div class="status" id="magSource">—</div>
-        </div>
-        <div style="width:220px;margin-top:8px">
-          <div style="height:10px;background:#032030;border-radius:999px;overflow:hidden;">
-            <div id="magBar" style="height:100%;width:0%;transition:width .6s linear;background:linear-gradient(90deg,#ffd166,#ff6b6b);"></div>
-          </div>
-          <div style="display:flex;justify-content:space-between;font-size:12px;margin-top:6px;color:#9fb3d2">
-            <div>Brighter (0)</div><div>Fainter (18+)</div>
-          </div>
-        </div>
-
-        <div style="margin-top:12px;width:100%">
-          <div style="font-size:13px;color:#9fb3d2">Magnitude history (latest first)</div>
-          <div class="history">
-            <table id="historyTable"><thead><tr><th>Time (UTC)</th><th>Source</th><th>Mag</th><th>Note</th></tr></thead><tbody></tbody></table>
-          </div>
-        </div>
-      </div>
-
-      <div class="card" style="padding:12px;">
-        <h3 style="margin-top:0">Details, diagnostics & raw fetch output</h3>
-        <p>Interpretation rules included on the page:</p>
-        <ul>
-          <li>Lower magnitude number = brighter object.</li>
-          <li>5 magnitudes = 100× brightness.</li>
-          <li>Watch for sustained magnitudes ~9.5–9.8 for two weeks → anomalous brightness.</li>
-          <li>Climb toward 9.0 or brighter → geometric approach confirmation.</li>
-        </ul>
-
-        <div style="margin-top:10px">
-          <b>Raw / diagnostic output</b>
-          <textarea id="rawFetch" readonly>Not fetched yet.</textarea>
-        </div>
-      </div>
-    </div>
-
-    <footer>
-      This page uses a small server-side proxy to fetch and parse TheSkyLive and COBS. If you see HTML in the raw output, the upstream site or the proxy returned non-JSON and you should inspect the raw HTML.
-    </footer>
   </div>
 
 <script>
-// Robust client fetch logic
+// Live client for atlas-c4gn.onrender.com
+const API_ROOT = 'https://atlas-c4gn.onrender.com';
+const CLIENT_POLL_SECONDS = 21600; // 6 hours
+const DISTANCE_POLL_SECONDS = 10; // 10 seconds
+const MAX_HISTORY = 100;
 let pollTimer = null;
-let lastMag = null;
+let distanceTimer = null;
+let history = [];
 
-function getApiRoot(){
-  const ui = document.getElementById('apiRoot').value.trim();
-  if (ui) return ui.replace(/\/$/,'');
-  // If this page was loaded via http(s), use same origin by default so relative paths work
-  if (window.location.protocol.startsWith('http')) return '';
-  // If file://, default to localhost
-  return 'http://localhost:3000';
+function formatUTC(d) {
+  return new Date(d).toISOString().replace('T', ' ').replace('Z', ' UTC');
 }
 
-function formatUTC(d){ return new Date(d).toISOString().replace('T',' ').replace('Z',' UTC'); }
-
-async function safeFetchJson(url){
-  // Performs fetch and returns an object: {ok:boolean, status, headers, json?, text?}
-  try{
-    const resp = await fetch(url, {cache:'no-store'});
+async function safeFetchJson(url) {
+  try {
+    const resp = await fetch(url, { cache: 'no-store' });
     const ct = resp.headers.get('content-type') || '';
-    if (!resp.ok){
-      // Attempt to read text to show helpful debug info
+    if (!resp.ok) {
       const text = await resp.text();
-      return { ok:false, status:resp.status, statusText:resp.statusText, contentType:ct, text };
+      return { ok: false, status: resp.status, text };
     }
-    if (ct.includes('application/json') || ct.includes('text/json')){
-      try{
+    if (ct.includes('application/json') || ct.includes('text/json')) {
+      try {
         const json = await resp.json();
-        return { ok:true, status:resp.status, json };
-      }catch(e){
+        return { ok: true, json };
+      } catch (e) {
         const text = await resp.text();
-        return { ok:false, status:resp.status, error:'JSON parse error', text };
+        return { ok: false, error: 'json', text };
       }
     }
-    // Not JSON: return raw text so UI can show it
     const text = await resp.text();
-    return { ok:true, status:resp.status, contentType:ct, text };
-  }catch(err){
-    return { ok:false, error:err.toString() };
+    return { ok: true, text };
+  } catch (e) {
+    return { ok: false, error: e.toString() };
   }
 }
 
-async function fetchReadings(){
-  const API_ROOT = getApiRoot();
-  const urls = {
-    theskylive: (API_ROOT || '') + '/api/theskylive?path=/c2025n1-info',
-    cobsRecent: (API_ROOT || '') + '/api/cobs?recent=1'
-  };
-
-  document.getElementById('rawFetch').value = 'Fetching...';
-
-  // Perform both fetches concurrently but handle each independently
-  const [sResp, cResp] = await Promise.all([safeFetchJson(urls.theskylive), safeFetchJson(urls.cobsRecent)]);
-
-  // Show raw results for debugging
-  const dbg = { theskylive:sResp, cobs:cResp };
-  document.getElementById('rawFetch').value = JSON.stringify(dbg, null, 2);
-
-  // Derive chosen reading with safe fallbacks
-  let chosen = null;
-
-  if (cResp && cResp.ok && cResp.json && cResp.json.latestMag){
-    chosen = { mag: Number(cResp.json.latestMag), src:'COBS', note:cResp.json.note || '' };
-  } else if (cResp && cResp.ok && cResp.text){
-    // If COBS returned text, attempt a heuristic parse in-browser as a fallback
-    const m = cResp.text.match(/C\/?\s*2025\s*N1[\s\S]{0,120}?([0-9]{1,2}\.[0-9]{1,2})/i) || cResp.text.match(/([0-9]{1,2}\.[0-9]{1,2})\s*mag/i);
-    if (m) chosen = { mag: Number(m[1]), src:'COBS (inlined parse)', note:'Parsed from raw text' };
-  }
-
-  if (!chosen){
-    if (sResp && sResp.ok && sResp.json){
-      if (sResp.json.observedMag) chosen = { mag: Number(sResp.json.observedMag), src:'TheSkyLive (observed)', note:sResp.json.note||'' };
-      else if (sResp.json.predictedMag) chosen = { mag: Number(sResp.json.predictedMag), src:'TheSkyLive (predicted)', note:sResp.json.note||'' };
-    } else if (sResp && sResp.ok && sResp.text){
-      const m = sResp.text.match(/observed\s+mag(?:nitude)?\D*([0-9]{1,2}\.\d{1,2})/i) || sResp.text.match(/predicted\s+mag(?:nitude)?\D*([0-9]{1,2}\.\d{1,2})/i) || sResp.text.match(/mag[: ]\s*([0-9]{1,2}\.\d{1,2})/i);
-      if (m) chosen = { mag: Number(m[1]), src:'TheSkyLive (inlined parse)', note:'Parsed from raw text' };
-    }
-  }
-
-  if (chosen){
-    pushHistory(chosen);
-    updateGauge(chosen);
-    document.getElementById('lastUpdated').textContent = 'Updated: ' + formatUTC(new Date());
-  } else {
-    document.getElementById('magSource').textContent = 'No magnitude found (see raw output)';
-  }
-}
-
-function updateGauge(entry){
+function updateUIFromEntry(entry) {
   const magEl = document.getElementById('currentMag');
   const srcEl = document.getElementById('magSource');
   const bar = document.getElementById('magBar');
@@ -213,384 +297,87 @@ function updateGauge(entry){
   srcEl.textContent = entry.src + (entry.note ? ' — ' + entry.note : '');
 
   const clamped = Math.max(0, Math.min(18, entry.mag));
-  const pct = Math.max(0, Math.min(100, Math.round((18 - clamped) / 18 * 100)));
+  const pct = Math.round((18 - clamped) / 18 * 100);
   bar.style.width = pct + '%';
-
-  const threshold = parseFloat(document.getElementById('alertMag').value || '9.8');
-  if (entry.mag <= threshold) document.querySelector('.card').classList.add('anomaly');
-  else document.querySelector('.card').classList.remove('anomaly');
-
-  lastMag = entry.mag;
 }
 
-function pushHistory(entry){
-  const tbody = document.querySelector('#historyTable tbody');
-  const tr = document.createElement('tr');
-  tr.innerHTML = `<td>${formatUTC(new Date())}</td><td>${entry.src}</td><td>${entry.mag.toFixed(2)}</td><td>${entry.note||''}</td>`;
-  tbody.insertBefore(tr, tbody.firstChild);
-  while (tbody.children.length > 500) tbody.removeChild(tbody.lastChild);
-}
-
-// Controls
-document.getElementById('start').addEventListener('click', ()=>{
-  const interval = Math.max(5, parseInt(document.getElementById('interval').value || '30',10));
-  if (pollTimer) clearInterval(pollTimer);
-  fetchReadings();
-  pollTimer = setInterval(fetchReadings, interval*1000);
-});
-document.getElementById('stop').addEventListener('click', ()=>{ if (pollTimer) clearInterval(pollTimer); pollTimer=null; document.getElementById('lastUpdated').textContent='Stopped'; });
-
-// Diagnostics button: exercises /api/test and the scraping endpoints
-document.getElementById('diag').addEventListener('click', async ()=>{
-  const API_ROOT = getApiRoot();
-  const testUrl = (API_ROOT || '') + '/api/test';
-  const tlUrl = (API_ROOT || '') + '/api/theskylive?path=/c2025n1-info';
-  const cobsUrl = (API_ROOT || '') + '/api/cobs?recent=1';
-  document.getElementById('rawFetch').value = 'Running diagnostics...';
-
-  const [t,tl,c] = await Promise.all([safeFetchJson(testUrl), safeFetchJson(tlUrl), safeFetchJson(cobsUrl)]);
-  document.getElementById('rawFetch').value = JSON.stringify({ test:t, theskylive:tl, cobs:c }, null, 2);
-});
-
-// Auto-start is disabled. Use Start button.
-</script>
-
-<!-- ========================= server.js (save as server.js in same folder) ========================= -->
-
-<script type="text/plain" id="server-js">
-// Require Node 14+ (CommonJS). This server exposes a deterministic /api/test endpoint
-// and the scraping endpoints. It also serves index.html.
-
-const express = require('express');
-const fetch = require('node-fetch'); // node-fetch v2
-const cheerio = require('cheerio');
-const cors = require('cors');
-const path = require('path');
-
-const app = express();
-app.use(cors());
-app.use(express.json());
-
-// Serve static files from the folder (index.html must be present)
-app.use(express.static(path.join(__dirname)));
-
-// Deterministic test endpoint to verify server + client JSON handling
-app.get('/api/test', (req,res)=>{
-  res.json({ ok:true, server:'3I-ATLAS-Tracker', timestamp:new Date().toISOString(), note:'This is a test JSON response' });
-});
-
-// TheSkyLive scraping endpoint
-app.get('/api/theskylive', async (req,res)=>{
-  try{
-    const pathParam = req.query.path || '/c2025n1-info';
-    const url = 'https://theskylive.com' + pathParam;
-    const r = await fetch(url, { timeout: 15000 });
-    const text = await r.text();
-    const $ = cheerio.load(text);
-
-    // Heuristic parsing - keep simple and defensive
-    let observedMag = null, predictedMag = null, note = null;
-    const pageText = $('body').text();
-
-    const obs = pageText.match(/observed\s+mag(?:nitude)?\D*([0-9]{1,2}\.\d{1,2})/i) || pageText.match(/observed\s*[:\-]\s*([0-9]{1,2}\.\d{1,2})/i);
-    if (obs) observedMag = parseFloat(obs[1]);
-    const pred = pageText.match(/predicted\s+mag(?:nitude)?\D*([0-9]{1,2}\.\d{1,2})/i) || pageText.match(/predicted\s*[:\-]\s*([0-9]{1,2}\.\d{1,2})/i);
-    if (pred) predictedMag = parseFloat(pred[1]);
-
-    // Return consistent JSON even if parsing yields nulls
-    res.json({ url, observedMag, predictedMag, note, rawSnippet: pageText.slice(0,1200) });
-  } catch(e){
-    res.status(500).json({ error: e.toString() });
-  }
-});
-
-// COBS recent scraping endpoint
-app.get('/api/cobs', async (req,res)=>{
-  try{
-    const url = 'https://cobs.si/recent/';
-    const r = await fetch(url, { timeout: 15000 });
-    const text = await r.text();
-    const $ = cheerio.load(text);
-    const bodyText = $('body').text();
-
-    const cometRe = /C\/?\s*2025\s*N1/gi;
-    const lines = bodyText.split(/\n+/).map(s=>s.trim()).filter(Boolean);
-    let latestMag = null; let note = null;
-    for (let ln of lines){
-      if (cometRe.test(ln)){
-        const m = ln.match(/mag\.?\s*=?\s*([0-9]{1,2}\.\d{1,2})/i) || ln.match(/([0-9]{1,2}\.\d{1,2})/);
-        if (m){ latestMag = parseFloat(m[1]); note = ln.slice(0,300); break; }
-      }
-    }
-
-    res.json({ url, latestMag, note, rawSnippet: bodyText.slice(0,1200) });
-  } catch(e){
-    res.status(500).json({ error: e.toString() });
-  }
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, ()=>console.log('Server running on port',PORT));
-</script>
-
-<!-- ========================= Minimal tests and troubleshooting ========================= -->
-
-1) Start the server and check test endpoint:
-   - curl http://localhost:3000/api/test
-   Expected JSON:
-     { "ok": true, "server": "3I-ATLAS-Tracker", "timestamp": "...", "note": "This is a test JSON response" }
-
-2) Visit http://localhost:3000 in a browser, open developer console, and click "Run diagnostics".
-   - The textarea should display a JSON blob with three entries: test, theskylive, cobs.
-   - Each entry will include either a JSON object (if server returned JSON) or a text snippet (if upstream returned HTML). If the upstream site returned HTML, the raw HTML/text will be included under rawSnippet or text fields so you can debug parsing.
-
-3) If you previously saw the "Unexpected token '<'" error, it should no longer crash the client. Instead you'll now see the raw text returned by the server and a clear diagnostic message.
-
-If you want, I can further harden parsing for the exact HTML layout of theSkyLive and COBS if you paste current raw HTML snippets produced by the diagnostics. Please run the diagnostics and paste the raw output here so I can tailor the parsing selectors.
-
-<!-- End of revised package -->
-
-<!-- ========================= Final automated GH / Render-ready index.html ========================= -->
-
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>3I / ATLAS Brightness Tracker — Live</title>
-  <style>
-    :root{font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,'Helvetica Neue',Arial;}
-    body{margin:0;background:#071022;color:#e6eef8}
-    .wrap{max-width:1100px;margin:18px auto;padding:18px}
-    .panel{background:linear-gradient(180deg,#071426,#031023);border-radius:14px;padding:18px;box-shadow:0 8px 30px rgba(2,6,23,.6)}
-    header{display:flex;align-items:center;gap:16px}
-    h1{margin:0;font-size:20px}
-    .sub{color:#93aecd;font-size:13px}
-    .topgrid{display:grid;grid-template-columns:320px 1fr;gap:18px;margin-top:18px}
-
-    /* left column */
-    .left{display:flex;flex-direction:column;gap:12px}
-    .bigmag{font-size:54px;font-weight:800;letter-spacing:-1px}
-    .source{font-size:13px;color:#9fb3d2}
-    .magbar{height:12px;background:#021827;border-radius:999px;overflow:hidden}
-    .magbar > i{display:block;height:100%;transition:width 900ms linear;background:linear-gradient(90deg,#ffd166,#ff6b6b)}
-    .delta{font-weight:700;font-size:18px}
-
-    /* history table */
-    table{width:100%;border-collapse:collapse;margin-top:8px}
-    th,td{padding:6px;border-bottom:1px solid rgba(255,255,255,.04);font-size:13px;text-align:left}
-    .history{max-height:360px;overflow:auto}
-
-    /* sparkline */
-    .spark{width:100%;height:80px}
-
-    /* responsive */
-    @media (max-width:880px){ .topgrid{grid-template-columns:1fr} }
-
-    footer{color:#86a6c5;font-size:12px;margin-top:12px}
-  </style>
-</head>
-<body>
-  <div class="wrap">
-    <div class="panel">
-      <header>
-        <div>
-          <h1>3I / ATLAS Brightness Tracker — Live</h1>
-          <div class="sub">Automated — data from <b>TheSkyLive</b> and <b>COBS</b>. Server: <code>https://atlas-c4gn.onrender.com</code></div>
-        </div>
-        <div style="margin-left:auto;text-align:right">
-          <div id="lastUpdated" class="sub">Last update: —</div>
-          <div id="status" class="sub">Status: connecting…</div>
-        </div>
-      </header>
-
-      <div class="topgrid">
-        <div class="left panel" style="padding:14px;">
-          <div style="display:flex;justify-content:space-between;align-items:center">
-            <div>
-              <div class="bigmag" id="currentMag">—</div>
-              <div class="source" id="magSource">—</div>
-            </div>
-            <div style="text-align:right">
-              <div class="delta" id="magDelta">—</div>
-              <div class="source" id="magFactor">—</div>
-            </div>
-          </div>
-
-          <div style="margin-top:12px">
-            <div class="magbar"><i id="magBar" style="width:0%"></i></div>
-            <div style="display:flex;justify-content:space-between;color:#9fb3d2;font-size:13px;margin-top:6px"><div>Bright (0)</div><div>Faint (18+)</div></div>
-          </div>
-
-          <div style="margin-top:14px">
-            <canvas id="spark" class="spark"></canvas>
-          </div>
-
-          <div style="margin-top:14px;font-size:13px;color:#9fb3d2">
-            <div><strong>Interpretation</strong></div>
-            <div>• Lower magnitude → brighter object. • 5 mag = 100× brightness. • Sustained ~9.5–9.8 for two weeks → anomalous.</div>
-          </div>
-        </div>
-
-        <div class="panel" style="padding:14px;">
-          <div style="display:flex;justify-content:space-between;align-items:center">
-            <div><strong>Observations (latest first)</strong></div>
-            <div style="color:#9fb3d2;font-size:13px">Auto-refresh: every 1 hour (client) — server cache refresh configurable</div>
-          </div>
-
-          <div class="history">
-            <table id="historyTable"><thead><tr><th>Time (UTC)</th><th>Source</th><th>Mag</th><th>Pred</th><th>Δ</th><th>Note</th></tr></thead><tbody></tbody></table>
-          </div>
-        </div>
-      </div>
-
-      <footer>Designed for Render deployment. Server: <code>https://atlas-c4gn.onrender.com</code>. Contact for customizations.</footer>
-    </div>
-  </div>
-
-<script>
-// Automated live client for atlas-c4gn.onrender.com
-const API_ROOT = 'https://atlas-c4gn.onrender.com';
-const CLIENT_POLL_SECONDS = 3600; // 1 hour
-const MAX_HISTORY = 500;
-let pollTimer = null;
-let history = []; // {time, src, mag, predicted, note}
-
-function formatUTC(d){ return new Date(d).toISOString().replace('T',' ').replace('Z',' UTC'); }
-
-async function safeFetchJson(url){
-  try{
-    const resp = await fetch(url, { cache:'no-store' });
-    const ct = resp.headers.get('content-type') || '';
-    if (!resp.ok){ const text = await resp.text(); return { ok:false, status:resp.status, text }; }
-    if (ct.includes('application/json') || ct.includes('text/json')){ try{ const json = await resp.json(); return { ok:true, json }; }catch(e){ const text = await resp.text(); return { ok:false, error:'json', text }; } }
-    const text = await resp.text(); return { ok:true, text };
-  }catch(e){ return { ok:false, error:e.toString() }; }
-}
-
-function computeDelta(pred, actual){
-  if (pred==null || actual==null) return null;
-  return pred - actual; // positive => actual brighter
-}
-
-function brightnessFactor(delta){ if (delta==null) return null; return Math.pow(10, delta/2.5); }
-
-function updateUIFromEntry(entry){
-  const magEl = document.getElementById('currentMag');
-  const srcEl = document.getElementById('magSource');
-  const bar = document.getElementById('magBar');
-  const deltaEl = document.getElementById('magDelta');
-  const factorEl = document.getElementById('magFactor');
-
-  magEl.textContent = entry.mag.toFixed(2);
-  srcEl.textContent = entry.src + (entry.note? ' — ' + entry.note : '');
-
-  const clamped = Math.max(0, Math.min(18, entry.mag));
-  const pct = Math.round((18-clamped)/18*100);
-  bar.style.width = pct + '%';
-
-  const delta = computeDelta(entry.predicted, entry.mag);
-  if (delta !== null){
-    const sign = delta>0?'+':(delta<0? '−':'');
-    deltaEl.textContent = sign + Math.abs(delta).toFixed(2);
-    if (delta>0.05) deltaEl.style.color = '#7ef0a3';
-    else if (delta<-0.05) deltaEl.style.color = '#ff9b9b';
-    else deltaEl.style.color = '#9fb3d2';
-
-    const bf = brightnessFactor(delta);
-    factorEl.textContent = (bf?('×'+(bf>=100?Math.round(bf):Math.round(bf*100)/100)):'—') + (delta>0? ' brighter':' fainter');
-  } else { deltaEl.textContent='—'; factorEl.textContent='—'; deltaEl.style.color='#9fb3d2'; }
-}
-
-function renderHistoryTable(){
+function renderHistoryTable() {
   const tbody = document.querySelector('#historyTable tbody');
   tbody.innerHTML = '';
-  for (let row of history){
+  for (let row of history.slice(0, MAX_HISTORY)) {
     const tr = document.createElement('tr');
     const dt = `<td>${formatUTC(row.time)}</td>`;
     const src = `<td>${row.src}</td>`;
     const mag = `<td>${row.mag.toFixed(2)}</td>`;
-    const pred = `<td>${row.predicted!==null?row.predicted.toFixed(2):''}</td>`;
-    const delta = (row.predicted!==null)?`<td>${(row.predicted-row.mag>0?'+':'')}${(row.predicted-row.mag).toFixed(2)}</td>`:'<td></td>';
-    const note = `<td>${row.note||''}</td>`;
-    tr.innerHTML = dt+src+mag+pred+delta+note;
+    const note = `<td>${row.note || ''}</td>`;
+    tr.innerHTML = dt + src + mag + note;
     tbody.appendChild(tr);
   }
 }
 
-function updateSparkline(){
-  const canvas = document.getElementById('spark');
-  const ctx = canvas.getContext('2d');
-  const w = canvas.width = canvas.clientWidth * devicePixelRatio;
-  const h = canvas.height = canvas.clientHeight * devicePixelRatio;
-  ctx.clearRect(0,0,w,h);
-
-  if (history.length===0) return;
-  // use last 40 points
-  const pts = history.slice(0,40).map(r=>r.mag).reverse();
-  const mins = Math.min(...pts); const maxs = Math.max(...pts);
-  const pad = 8*devicePixelRatio;
-  ctx.lineWidth = 2*devicePixelRatio;
-  ctx.strokeStyle = '#7ec8ff';
-  ctx.beginPath();
-  for (let i=0;i<pts.length;i++){
-    const x = pad + ( (w-2*pad) * (i/(pts.length-1 || 1)) );
-    const y = pad + ( (h-2*pad) * ( (pts[i]-mins) / (maxs-mins || 1) ) );
-    const yInv = h - y; // invert so lower mag (brighter) is higher on canvas
-    if (i===0) ctx.moveTo(x,yInv); else ctx.lineTo(x,yInv);
-  }
-  ctx.stroke();
-  // draw points
-  ctx.fillStyle = '#ffd166';
-  for (let i=0;i<pts.length;i++){
-    const x = pad + ( (w-2*pad) * (i/(pts.length-1 || 1)) );
-    const y = pad + ( (h-2*pad) * ( (pts[i]-mins) / (maxs-mins || 1) ) );
-    const yInv = h - y;
-    ctx.beginPath(); ctx.arc(x,yInv,3*devicePixelRatio,0,Math.PI*2); ctx.fill();
+async function fetchDistance() {
+  try {
+    const res = await safeFetchJson(API_ROOT + '/api/distance');
+    if (res.ok && res.json && res.json.distanceKm !== null) {
+      const distEl = document.getElementById('distanceValue');
+      const km = res.json.distanceKm;
+      distEl.textContent = km.toLocaleString('en-US', { maximumFractionDigits: 0 });
+    }
+  } catch (e) {
+    console.error('Distance fetch failed:', e);
   }
 }
 
-async function fetchLatest(){
+async function fetchLatest() {
   document.getElementById('status').textContent = 'Status: fetching…';
-  try{
+  try {
     const res = await safeFetchJson(API_ROOT + '/api/latest');
-    if (!res.ok){ document.getElementById('status').textContent = 'Status: fetch failed'; return; }
-    const j = res.json || res;
-    // normalize cache structure: server returns {ok:true, cache: { updated, latestMag, observedMag, predictedMag, source, raw }}
-    const cache = (res.json && res.json.cache) ? res.json.cache : res.json || res;
-    let mag = null; let predicted = null; let src = 'server'; let note = '';
-    if (cache){
-      mag = cache.latestMag ?? cache.observedMag ?? cache.predictedMag ?? null;
-      predicted = cache.predictedMag ?? null;
-      src = cache.source ?? src;
-      note = cache.raw ? (cache.raw.theskylive && cache.raw.theskylive.rawSnippet ? 'parsed' : '') : '';
+    if (!res.ok) {
+      document.getElementById('status').textContent = 'Status: fetch failed';
+      return;
     }
-    if (mag===null){ document.getElementById('status').textContent = 'Status: no data'; return; }
+    const cache = res.json.cache || res.json;
+    let mag = cache.latestMag ?? cache.observedMag ?? cache.predictedMag ?? null;
+    let src = cache.source ?? 'unknown';
 
-    const entry = { time: new Date(), src, mag: Number(mag), predicted: predicted!==null?Number(predicted):null, note };
+    if (mag === null) {
+      document.getElementById('status').textContent = 'Status: no data';
+      return;
+    }
 
-    // push to head of history
-    history.unshift(entry);
-    if (history.length>MAX_HISTORY) history.pop();
+    const entry = {
+      time: new Date(),
+      src,
+      mag: Number(mag),
+      note: ''
+    };
+
+    // add to history if new
+    if (!history.length || history[0].mag !== entry.mag) {
+      history.unshift(entry);
+      if (history.length > MAX_HISTORY) history.pop();
+    }
 
     renderHistoryTable();
     updateUIFromEntry(entry);
-    updateSparkline();
 
-    document.getElementById('lastUpdated').textContent = 'Last update: ' + formatUTC(new Date(cache.updated||Date.now()));
+    document.getElementById('lastUpdated').textContent = 'Last update: ' + formatUTC(new Date(cache.updated || Date.now()));
     document.getElementById('status').textContent = 'Status: OK';
-  }catch(e){ document.getElementById('status').textContent = 'Status: error'; console.error(e); }
+  } catch (e) {
+    document.getElementById('status').textContent = 'Status: error';
+    console.error(e);
+  }
 }
 
 // start automatic polling
-(async function(){
-  // immediate fetch
+(async function() {
+  // immediate fetch on page load
   await fetchLatest();
-  // then schedule
+  await fetchDistance();
+  // then schedule for magnitude (every 6 hours) and distance (every 10 seconds)
   pollTimer = setInterval(fetchLatest, CLIENT_POLL_SECONDS * 1000);
+  distanceTimer = setInterval(fetchDistance, DISTANCE_POLL_SECONDS * 1000);
 })();
 </script>
 </body>
 </html>
-
-<!-- End automated index.html -->
