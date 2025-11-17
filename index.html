@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>3I / ATLAS Brightness Tracker — Revised</title>
+  <style>
+    :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,'Helvetica Neue',Arial;}
+    body{margin:0;padding:18px;background:#08101a;color:#e6eef8}
+    .card{background:linear-gradient(180deg,#0f1b2a, #071023);border-radius:12px;padding:16px;box-shadow:0 6px 18px rgba(0,0,0,.6);}
+    header{display:flex;gap:12px;align-items:center}
+    h1{margin:0;font-size:18px}
+    .controls{margin-top:12px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+    input[type=number]{width:90px;padding:6px;border-radius:6px;border:1px solid #233243;background:#08101a;color:#dfefff}
+    button{padding:8px 12px;border-radius:8px;border:0;background:#1f6feb;color:white;cursor:pointer}
+    .grid{display:grid;grid-template-columns:320px 1fr;gap:16px;margin-top:16px}
+    .gauge{display:flex;flex-direction:column;gap:8px;align-items:center}
+    .magnitude{font-size:40px;font-weight:700}
+    .status{font-size:12px;color:#9fb3d2}
+    table{width:100%;border-collapse:collapse;margin-top:8px}
+    th,td{padding:6px;border-bottom:1px solid rgba(255,255,255,.04);text-align:left;font-size:13px}
+    .history{max-height:360px;overflow:auto}
+    .anomaly{background:linear-gradient(90deg,rgba(255,97,97,.08),transparent);}
+    footer{margin-top:12px;font-size:12px;color:#96a9c7}
+    .muted{color:#8fa6c6;font-size:13px}
+    .row{display:flex;gap:8px;align-items:center}
+    textarea{width:100%;height:160px;background:#051223;color:#9fb3d2;border-radius:6px;padding:8px;border:1px solid #123;}
+  </style>
+</head>
+<body>
+  <div class="card" id="app">
+    <header>
+      <div>
+        <h1>3I / ATLAS Brightness Tracker — Revised</h1>
+        <div class="status muted">Sources: TheSkyLive (predicted + observed) • COBS recent amateur reports</div>
+      </div>
+    </header>
+
+    <div class="controls">
+      <label>API root (leave blank to use same origin): <input id="apiRoot" type="text" placeholder="https://your-render-service.onrender.com" style="width:260px;padding:6px;border-radius:6px;border:1px solid #233243;background:#08101a;color:#dfefff"></label>
+      <label>Poll interval (s): <input id="interval" type="number" min="5" value="30"></label>
+      <label>Alert mag threshold: <input id="alertMag" type="number" step="0.1" value="9.8"></label>
+      <button id="start">Start</button>
+      <button id="stop">Stop</button>
+      <button id="diag">Run diagnostics</button>
+      <div id="lastUpdated" style="margin-left:12px;font-size:13px;color:#9fb3d2">Not started</div>
+    </div>
+
+    <div class="grid">
+      <div class="gauge card" style="padding:12px;">
+        <div style="text-align:center">
+          <div class="magnitude" id="currentMag">—</div>
+          <div class="status" id="magSource">—</div>
+        </div>
+        <div style="width:220px;margin-top:8px">
+          <div style="height:10px;background:#032030;border-radius:999px;overflow:hidden;">
+            <div id="magBar" style="height:100%;width:0%;transition:width .6s linear;background:linear-gradient(90deg,#ffd166,#ff6b6b);"></div>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:12px;margin-top:6px;color:#9fb3d2">
+            <div>Brighter (0)</div><div>Fainter (18+)</div>
+          </div>
+        </div>
+
+        <div style="margin-top:12px;width:100%">
+          <div style="font-size:13px;color:#9fb3d2">Magnitude history (latest first)</div>
+          <div class="history">
+            <table id="historyTable"><thead><tr><th>Time (UTC)</th><th>Source</th><th>Mag</th><th>Note</th></tr></thead><tbody></tbody></table>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="padding:12px;">
+        <h3 style="margin-top:0">Details, diagnostics & raw fetch output</h3>
+        <p>Interpretation rules included on the page:</p>
+        <ul>
+          <li>Lower magnitude number = brighter object.</li>
+          <li>5 magnitudes = 100× brightness.</li>
+          <li>Watch for sustained magnitudes ~9.5–9.8 for two weeks → anomalous brightness.</li>
+          <li>Climb toward 9.0 or brighter → geometric approach confirmation.</li>
+        </ul>
+
+        <div style="margin-top:10px">
+          <b>Raw / diagnostic output</b>
+          <textarea id="rawFetch" readonly>Not fetched yet.</textarea>
+        </div>
+      </div>
+    </div>
+
+    <footer>
+      This page uses a small server-side proxy to fetch and parse TheSkyLive and COBS. If you see HTML in the raw output, the upstream site or the proxy returned non-JSON and you should inspect the raw HTML.
+    </footer>
+  </div>
+
+<script>
+// Robust client fetch logic
+let pollTimer = null;
+let lastMag = null;
+
+function getApiRoot(){
+  const ui = document.getElementById('apiRoot').value.trim();
+  if (ui) return ui.replace(/\/$/,'');
+  if (window.location.protocol.startsWith('http')) return '';
+  return 'http://localhost:3000';
+}
+
+function formatUTC(d){ return new Date(d).toISOString().replace('T',' ').replace('Z',' UTC'); }
+
+async function safeFetchJson(url){
+  try{
+    const resp = await fetch(url, {cache:'no-store'});
+    const ct = resp.headers.get('content-type') || '';
+    if (!resp.ok){
+      const text = await resp.text();
+      return { ok:false, status:resp.status, statusText:resp.statusText, contentType:ct, text };
+    }
+    if (ct.includes('application/json') || ct.includes('text/json')){
+      try{
+        const json = await resp.json();
+        return { ok:true, status:resp.status, json };
+      }catch(e){
+        const text = await resp.text();
+        return { ok:false, status:resp.status, error:'JSON parse error', text };
+      }
+    }
+    const text = await resp.text();
+    return { ok:true, status:resp.status, contentType:ct, text };
+  }catch(err){
+    return { ok:false, error:err.toString() };
+  }
+}
+
+async function fetchReadings(){
+  const API_ROOT = getApiRoot();
+  const urls = {
+    latest: (API_ROOT || '') + '/api/latest',
+    theskylive: (API_ROOT || '') + '/api/theskylive?path=/c2025n1-info',
+    cobsRecent: (API_ROOT || '') + '/api/cobs?recent=1'
+  };
+
+  document.getElementById('rawFetch').value = 'Fetching...';
+
+  // Prefer cached /api/latest which will be kept fresh by the server's background job
+  const latestResp = await safeFetchJson(urls.latest);
+  const dbg = { latest: latestResp };
+  document.getElementById('rawFetch').value = JSON.stringify(dbg, null, 2);
+
+  let chosen = null;
+  if (latestResp && latestResp.ok && latestResp.json && (latestResp.json.latestMag || latestResp.json.observedMag || latestResp.json.predictedMag)){
+    // Normalize fields into chosen
+    const j = latestResp.json;
+    const mag = j.latestMag ?? j.observedMag ?? j.predictedMag ?? null;
+    if (mag !== null) chosen = { mag: Number(mag), predictedMag: j.predictedMag ?? null, src: j.source || 'server/cache', note: 'cached' };
+  } else {
+    // fallback: try the individual endpoints to get something
+    const [sResp, cResp] = await Promise.all([safeFetchJson(urls.theskylive), safeFetchJson(urls.cobsRecent)]);
+    document.getElementById('rawFetch').value = JSON.stringify({ theskylive:sResp, cobs:cResp }, null, 2);
+    if (cResp && cResp.ok && cResp.json && cResp.json.latestMag) chosen = { mag: Number(cResp.json.latestMag), predictedMag: null, src:'COBS', note:cResp.json.note||'' };
+    else if (sResp && sResp.ok && sResp.json && (sResp.json.observedMag || sResp.json.predictedMag)) chosen = { mag: Number(sResp.json.observedMag ?? sResp.json.predictedMag), predictedMag: sResp.json.predictedMag ?? null, src:'TheSkyLive', note:'' };
+  }
+
+  if (chosen){
+    pushHistory(chosen);
+    updateGauge(chosen);
+    document.getElementById('lastUpdated').textContent = 'Updated: ' + formatUTC(new Date());
+  } else {
+    document.getElementById('magSource').textContent = 'No magnitude found (see raw output)';
+  }
+}
+
+function updateGauge(entry){
+  const magEl = document.getElementById('currentMag');
+  const srcEl = document.getElementById('magSource');
+  const bar = document.getElementById('magBar');
+
+  magEl.textContent = entry.mag.toFixed(2);
+  srcEl.textContent = entry.src + (entry.note ? ' — ' + entry.note : '');
+
+  const clamped = Math.max(0, Math.min(18, entry.mag));
+  const pct = Math.max(0, Math.min(100, Math.round((18 - clamped) / 18 * 100)));
+  bar.style.width = pct + '%';
+
+  const threshold = parseFloat(document.getElementById('alertMag').value || '9.8');
+  if (entry.mag <= threshold) document.querySelector('.card').classList.add('anomaly');
+  else document.querySelector('.card').classList.remove('anomaly');
+
+  lastMag = entry.mag;
+}
+
+function pushHistory(entry){
+  const tbody = document.querySelector('#historyTable tbody');
+  const tr = document.createElement('tr');
+  tr.innerHTML = `<td>${formatUTC(new Date())}</td><td>${entry.src}</td><td>${entry.mag.toFixed(2)}</td><td>${entry.note||''}</td>`;
+  tbody.insertBefore(tr, tbody.firstChild);
+  while (tbody.children.length > 500) tbody.removeChild(tbody.lastChild);
+}
+
+// Controls
+document.getElementById('start').addEventListener('click', ()=>{
+  const interval = Math.max(5, parseInt(document.getElementById('interval').value || '30',10));
+  if (pollTimer) clearInterval(pollTimer);
+  fetchReadings();
+  pollTimer = setInterval(fetchReadings, interval*1000);
+});
+document.getElementById('stop').addEventListener('click', ()=>{ if (pollTimer) clearInterval(pollTimer); pollTimer=null; document.getElementById('lastUpdated').textContent='Stopped'; });
+
+// Diagnostics button: exercises /api/test and the scraping endpoints
+document.getElementById('diag').addEventListener('click', async ()=>{
+  const API_ROOT = getApiRoot();
+  const testUrl = (API_ROOT || '') + '/api/test';
+  const tlUrl = (API_ROOT || '') + '/api/theskylive?path=/c2025n1-info';
+  const cobsUrl = (API_ROOT || '') + '/api/cobs?recent=1';
+  document.getElementById('rawFetch').value = 'Running diagnostics...';
+
+  const [t,tl,c] = await Promise.all([safeFetchJson(testUrl), safeFetchJson(tlUrl), safeFetchJson(cobsUrl)]);
+  document.getElementById('rawFetch').value = JSON.stringify({ test:t, theskylive:tl, cobs:c }, null, 2);
+});
+
+// Auto-start is disabled. Use Start button.
+</script>
+
+<!-- ========================= server.js (save as server.js in same folder) ========================= -->
+
+<!-- This server implements a background fetch job that refreshes cached readings every REFRESH_INTERVAL_HOURS (env var, default 3). -->
+<!-- Deploy to Render: push repo with these two files, set start command to `node server.js`, and optionally set REFRESH_INTERVAL_HOURS. -->
