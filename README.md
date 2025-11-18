@@ -34,7 +34,7 @@ Comet C/2025 N1 exhibits characteristics that warrant continuous observation:
 ### Data Sources
 - **COBS (Comet Observation Database)** - Community-submitted visual observations
 - **TheSkyLive** - Automated astronomical calculations and ephemeris data
-- **Live Updates** - Automatic refresh every 6 hours for magnitude, every 60 seconds for distance
++- **Live Updates** - Automatic refresh every hour for magnitude, every 60 seconds for distance
 
 ## 🎮 Features
 
@@ -121,7 +121,7 @@ Server runs on `http://localhost:3000` (or PORT environment variable)
 
 ### Environment Variables
 ```bash
-REFRESH_INTERVAL_HOURS=6  # Magnitude data refresh interval
+REFRESH_INTERVAL_HOURS=1  # Magnitude data refresh interval
 PORT=3000                  # Server port
 ```
 
@@ -172,7 +172,7 @@ The background asteroid game features:
 
 ## 📈 Performance
 
-- **Client polling**: Every 6 hours for magnitude data
+- **Client polling**: Every hour for magnitude data
 - **Distance updates**: Every 60 seconds (server-side)
 - **Display interpolation**: Every 1 second for smooth distance countdown
 - **Rate limit cleanup**: Every 60 seconds

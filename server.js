@@ -73,7 +73,7 @@ let cache = {
   raw: {}
 };
 
-const REFRESH_INTERVAL_HOURS = Number(process.env.REFRESH_INTERVAL_HOURS || 6); // default every 6 hours
+const REFRESH_INTERVAL_HOURS = Number(process.env.REFRESH_INTERVAL_HOURS || 1); // default every 1 hour
 const REFRESH_INTERVAL_MS = Math.max(60, REFRESH_INTERVAL_HOURS * 3600) * 1000; // ensure at least 60s
 const DISTANCE_REFRESH_SECONDS = 10; // refresh distance every 10 seconds
 

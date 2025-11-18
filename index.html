@@ -194,6 +194,23 @@
       margin-top: 2px;
       text-transform: lowercase;
     }
+    .magnitude-trend {
+      font-size: 10px;
+      font-weight: 500;
+      margin-top: 4px;
+      padding: 3px 8px;
+      border-radius: 3px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .magnitude-trend.brighter {
+      background: rgba(126, 240, 163, 0.2);
+      color: #7ef0a3;
+    }
+    .magnitude-trend.dimmer {
+      background: rgba(255, 155, 155, 0.2);
+      color: #ff9b9b;
+    }
 
     .starmap-section {
       display: grid;
@@ -532,6 +549,7 @@
           <div class="big-mag" id="currentMag">—</div>
           <div class="mag-source" id="magSource">—</div>
           <div class="mag-status" id="magStatus">—</div>
+          <div class="magnitude-trend" id="magnitudeTrend"></div>
           <div class="mag-bar">
             <i id="magBar" style="width: 0%"></i>
           </div>
@@ -593,7 +611,7 @@
 <script>
 // Live client for atlas-c4gn.onrender.com
 const API_ROOT = 'https://atlas-c4gn.onrender.com';
-const CLIENT_POLL_SECONDS = 21600; // 6 hours
+const CLIENT_POLL_SECONDS = 3600; // 1 hour
 const DISTANCE_POLL_SECONDS = 60; // Check real distance every 60 seconds
 const DISTANCE_DISPLAY_INTERVAL = 1000; // Update display every 1 second (interpolated)
 const MAX_HISTORY = 100;
@@ -646,10 +664,14 @@ async function safeFetchJson(url) {
   }
 }
 
+// Track previous magnitude for trend detection
+let previousDisplayedMag = null;
+
 function updateUIFromEntry(entry) {
   const magEl = document.getElementById('currentMag');
   const srcEl = document.getElementById('magSource');
   const statusEl = document.getElementById('magStatus');
+  const trendEl = document.getElementById('magnitudeTrend');
   const bar = document.getElementById('magBar');
 
   // Validate and sanitize inputs
@@ -668,6 +690,25 @@ function updateUIFromEntry(entry) {
     statusEl.textContent = '—';
     statusEl.className = 'mag-status';
   }
+
+  // Detect magnitude trend (Brighter/Closer if decreases, Dimmer if increases)
+  if (previousDisplayedMag !== null && previousDisplayedMag !== mag) {
+    if (mag < previousDisplayedMag) {
+      trendEl.textContent = 'Brighter / Closer';
+      trendEl.className = 'magnitude-trend brighter';
+    } else if (mag > previousDisplayedMag) {
+      trendEl.textContent = 'Dimmer';
+      trendEl.className = 'magnitude-trend dimmer';
+    } else {
+      trendEl.textContent = '';
+      trendEl.className = 'magnitude-trend';
+    }
+  } else {
+    trendEl.textContent = '';
+    trendEl.className = 'magnitude-trend';
+  }
+  
+  previousDisplayedMag = mag;
 
   const clamped = Math.max(0, Math.min(18, entry.mag));
   const pct = Math.round((18 - clamped) / 18 * 100);
