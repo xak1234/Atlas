@@ -428,8 +428,13 @@ function updateUIFromEntry(entry) {
   const statusEl = document.getElementById('magStatus');
   const bar = document.getElementById('magBar');
 
-  magEl.textContent = entry.mag.toFixed(2);
-  srcEl.textContent = entry.src + (entry.note ? ' — ' + entry.note : '');
+  // Validate and sanitize inputs
+  const mag = typeof entry.mag === 'number' && isFinite(entry.mag) ? entry.mag : 0;
+  const src = String(entry.src || 'unknown');
+  const note = entry.note ? String(entry.note) : '';
+  
+  magEl.textContent = mag.toFixed(2);
+  srcEl.textContent = src + (note ? ' — ' + note : '');
 
   // Display magnitude status
   if (entry.magStatus) {
@@ -714,11 +719,27 @@ function renderHistoryTable() {
   tbody.innerHTML = '';
   for (let row of history.slice(0, MAX_HISTORY)) {
     const tr = document.createElement('tr');
-    const dt = `<td>${formatUTC(row.time)}</td>`;
-    const src = `<td>${row.src}</td>`;
-    const mag = `<td>${row.mag.toFixed(2)}</td>`;
-    const note = `<td>${row.note || ''}</td>`;
-    tr.innerHTML = dt + src + mag + note;
+    
+    // Time cell
+    const tdTime = document.createElement('td');
+    tdTime.textContent = formatUTC(row.time);
+    tr.appendChild(tdTime);
+    
+    // Source cell
+    const tdSrc = document.createElement('td');
+    tdSrc.textContent = String(row.src || '');
+    tr.appendChild(tdSrc);
+    
+    // Magnitude cell
+    const tdMag = document.createElement('td');
+    tdMag.textContent = row.mag.toFixed(2);
+    tr.appendChild(tdMag);
+    
+    // Note cell
+    const tdNote = document.createElement('td');
+    tdNote.textContent = String(row.note || '');
+    tr.appendChild(tdNote);
+    
     tbody.appendChild(tr);
   }
 }
@@ -915,11 +936,19 @@ async function fetchLatest() {
       return;
     }
 
+    // Validate and sanitize data
+    const parsedMag = Number(mag);
+    if (!isFinite(parsedMag) || parsedMag < 0 || parsedMag > 30) {
+      console.error('Invalid magnitude value:', mag);
+      document.getElementById('status').textContent = 'Status: invalid data';
+      return;
+    }
+
     const entry = {
       time: new Date(),
-      src,
-      mag: Number(mag),
-      magStatus,
+      src: String(src).slice(0, 100), // Limit length
+      mag: parsedMag,
+      magStatus: ['normal', 'abnormal'].includes(magStatus) ? magStatus : 'normal',
       note: ''
     };
 

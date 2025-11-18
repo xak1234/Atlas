@@ -7,9 +7,58 @@ const cors = require('cors');
 const path = require('path');
 
 const app = express();
+
+// Security headers
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  next();
+});
+
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10kb' })); // Limit payload size
 app.use(express.static(path.join(__dirname)));
+
+// Simple rate limiting (in-memory)
+const rateLimitMap = new Map();
+const RATE_LIMIT_WINDOW = 60000; // 1 minute
+const RATE_LIMIT_MAX_REQUESTS = 60; // 60 requests per minute
+
+function rateLimit(req, res, next) {
+  const ip = req.ip || req.connection.remoteAddress;
+  const now = Date.now();
+  
+  if (!rateLimitMap.has(ip)) {
+    rateLimitMap.set(ip, { count: 1, resetTime: now + RATE_LIMIT_WINDOW });
+    return next();
+  }
+  
+  const record = rateLimitMap.get(ip);
+  
+  if (now > record.resetTime) {
+    rateLimitMap.set(ip, { count: 1, resetTime: now + RATE_LIMIT_WINDOW });
+    return next();
+  }
+  
+  if (record.count >= RATE_LIMIT_MAX_REQUESTS) {
+    return res.status(429).json({ error: 'Too many requests', retryAfter: Math.ceil((record.resetTime - now) / 1000) });
+  }
+  
+  record.count++;
+  next();
+}
+
+// Clean up rate limit map periodically
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, record] of rateLimitMap.entries()) {
+    if (now > record.resetTime) {
+      rateLimitMap.delete(ip);
+    }
+  }
+}, RATE_LIMIT_WINDOW);
 
 // Simple in-memory cache that is refreshed by a background job
 let cache = {
@@ -77,12 +126,25 @@ async function refreshCache(){
     const [ts, cobs] = await Promise.all([fetchTheSkyLive(), fetchCOBS()]);
     cache.updated = new Date().toISOString();
     cache.raw = { theskylive: ts, cobs: cobs };
+    
+    // Validate and sanitize magnitude values (must be between 0 and 30)
+    const validateMag = (mag) => {
+      const num = parseFloat(mag);
+      return (num >= 0 && num <= 30 && isFinite(num)) ? num : null;
+    };
+    
+    // Validate distance (must be positive and reasonable for solar system)
+    const validateDistance = (dist) => {
+      const num = parseFloat(dist);
+      return (num > 0 && num < 1e12 && isFinite(num)) ? num : null;
+    };
+    
     // choose priority: use COBS latest if present, else observed from theSkyLive, else predicted
-    cache.latestMag = cobs && cobs.latestMag ? cobs.latestMag : (ts && ts.observedMag ? ts.observedMag : (ts && ts.predictedMag ? ts.predictedMag : null));
-    cache.observedMag = ts && ts.observedMag ? ts.observedMag : null;
-    cache.predictedMag = ts && ts.predictedMag ? ts.predictedMag : null;
-    cache.distanceKm = ts && ts.distanceKm ? ts.distanceKm : null;
-    cache.source = cobs && cobs.latestMag ? 'COBS' : (ts && ts.observedMag ? 'TheSkyLive(observed)' : (ts && ts.predictedMag ? 'TheSkyLive(predicted)' : 'none'));
+    cache.latestMag = validateMag(cobs?.latestMag) ?? validateMag(ts?.observedMag) ?? validateMag(ts?.predictedMag) ?? null;
+    cache.observedMag = validateMag(ts?.observedMag) ?? null;
+    cache.predictedMag = validateMag(ts?.predictedMag) ?? null;
+    cache.distanceKm = validateDistance(ts?.distanceKm) ?? null;
+    cache.source = (cobs?.latestMag ? 'COBS' : (ts?.observedMag ? 'TheSkyLive(observed)' : (ts?.predictedMag ? 'TheSkyLive(predicted)' : 'none')));
     
     // Detect abnormal brightness: comet should get fainter (higher mag) as it recedes
     // If current magnitude is significantly brighter (lower) than previous, it's abnormal
@@ -125,28 +187,33 @@ async function refreshDistance(){
 })();
 
 // Endpoints
-app.get('/api/test', (req,res)=>{
+app.get('/api/test', rateLimit, (req,res)=>{
   res.json({ ok:true, server:'3I-ATLAS-Tracker', timestamp:new Date().toISOString(), note:'Test endpoint' });
 });
 
 // Return cached/latest reading
-app.get('/api/latest', (req,res)=>{
+app.get('/api/latest', rateLimit, (req,res)=>{
   res.json({ ok:true, cache });
 });
 
 // Quick distance endpoint (fetches fresh without waiting for cache)
-app.get('/api/distance', async (req,res)=>{
+app.get('/api/distance', rateLimit, async (req,res)=>{
   const result = await fetchTheSkyLive();
-  res.json({ ok:true, distanceKm: result.distanceKm, timestamp: new Date().toISOString() });
+  // Validate distance before sending
+  const validateDistance = (dist) => {
+    const num = parseFloat(dist);
+    return (num > 0 && num < 1e12 && isFinite(num)) ? num : null;
+  };
+  res.json({ ok:true, distanceKm: validateDistance(result.distanceKm), timestamp: new Date().toISOString() });
 });
 
 // Individual scraping endpoints for diagnostics (also update cache if immediate fetch needed)
-app.get('/api/theskylive', async (req,res)=>{
+app.get('/api/theskylive', rateLimit, async (req,res)=>{
   const result = await fetchTheSkyLive();
   res.json(result);
 });
 
-app.get('/api/cobs', async (req,res)=>{
+app.get('/api/cobs', rateLimit, async (req,res)=>{
   const result = await fetchCOBS();
   res.json(result);
 });
