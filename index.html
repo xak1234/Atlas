@@ -15,13 +15,25 @@
       align-items: center;
       justify-content: center;
       min-height: 100vh;
+      position: relative;
+    }
+    #asteroidCanvas {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 0;
     }
     .container {
       max-width: 900px;
       width: 100%;
+      position: relative;
+      z-index: 1;
     }
     .card {
-      background: linear-gradient(180deg, #0f1b2a, #071023);
+      background: linear-gradient(180deg, rgba(15, 27, 42, 0.7), rgba(7, 16, 35, 0.7));
       border-radius: 12px;
       padding: 28px;
       box-shadow: 0 6px 18px rgba(0, 0, 0, 0.6);
@@ -82,6 +94,17 @@
       font-weight: 800;
       letter-spacing: -2px;
       line-height: 1;
+      animation: pulseLuminosity 3s ease-in-out infinite;
+    }
+    @keyframes pulseLuminosity {
+      0%, 100% {
+        opacity: 1;
+        transform: scale(1);
+      }
+      50% {
+        opacity: 0.7;
+        transform: scale(1.05);
+      }
     }
     .mag-source {
       font-size: 13px;
@@ -153,6 +176,15 @@
       color: #ffd166;
       margin-top: 4px;
     }
+    .acceleration-status {
+      font-size: 12px;
+      font-weight: 600;
+      color: #ff6b6b;
+      margin-top: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      min-height: 16px;
+    }
 
     .starmap-section {
       display: grid;
@@ -181,6 +213,13 @@
       font-size: 32px;
       font-weight: 700;
       color: #7ef0a3;
+      margin-bottom: 8px;
+      text-align: center;
+    }
+    .contact-date {
+      font-size: 14px;
+      font-weight: 500;
+      color: #9fb3d2;
       margin-bottom: 12px;
       text-align: center;
     }
@@ -251,6 +290,7 @@
   </style>
 </head>
 <body>
+  <canvas id="asteroidCanvas"></canvas>
   <div class="container">
     <div class="card">
       <header>
@@ -280,6 +320,7 @@
             <div class="distance-label">Distance to Earth</div>
             <div class="distance-value" id="distanceValue">—</div>
             <div class="distance-label" style="margin-top: 4px;">km</div>
+            <div class="acceleration-status" id="accelerationStatus"></div>
           </div>
         </div>
 
@@ -287,6 +328,7 @@
         <div class="contact-section">
           <div class="days-label">Days to Contact</div>
           <div class="days-to-contact" id="daysToContact">—</div>
+          <div class="contact-date" id="contactDate">—</div>
           <div class="contact-canvas-container">
             <canvas id="contactCanvas" width="220" height="100"></canvas>
           </div>
@@ -319,7 +361,7 @@
       </div>
 
       <footer>
-        Designed for Render deployment. Server: <code>https://atlas-c4gn.onrender.com</code>. Contact for customizations.
+        Franks-Apps.com Node server: <code>https://atlas-c4gn.onrender.com</code>. Contact for customizations.
       </footer>
     </div>
   </div>
@@ -334,6 +376,7 @@ const MAX_HISTORY = 100;
 let pollTimer = null;
 let distanceTimer = null;
 let distanceDisplayTimer = null;
+let contactAnimationFrame = null;
 let history = [];
 
 // Distance tracking for smooth interpolation
@@ -341,8 +384,14 @@ let distanceState = {
   lastRealDistance: null,
   lastRealDistanceTime: null,
   currentDisplayDistance: null,
-  velocityKmPerSecond: 61, // km/s (positive = approaching Earth, ~221,000 km/h)
-  trajectoryPoints: [] // Array of {time, distance} for graphing
+  velocityKmPerSecond: null, // Will be calculated from actual distance measurements
+  trajectoryPoints: [], // Array of {time, distance} for graphing
+  velocityHistory: [] // Array of {time, velocity} for acceleration detection
+};
+
+// Animation state for contact visualization dots
+let contactAnimationState = {
+  animationTime: 0 // Tracks animation progress (0 to 1, loops)
 };
 
 function formatUTC(d) {
@@ -405,17 +454,51 @@ function drawContactVisualization(distanceKm) {
   
   // Calculate days to contact based on ACTUAL velocity from distance tracking
   const SECONDS_PER_DAY = 86400;
-  // Use the actual velocity from distanceState, or default to 8.1 km/s
-  const actualVelocity = distanceState.velocityKmPerSecond || 8.1;
-  const totalSeconds = (distanceKm || 0) / actualVelocity;
-  const daysToContact = totalSeconds / SECONDS_PER_DAY;
+  // Only calculate if we have a valid velocity (calculated from actual measurements)
+  // Use Math.abs to ensure positive velocity (approaching Earth)
+  const actualVelocity = distanceState.velocityKmPerSecond !== null && distanceState.velocityKmPerSecond > 0 
+    ? Math.abs(distanceState.velocityKmPerSecond) 
+    : null;
   
-  // Update the days display
+  // Update the days display and contact date
   const daysEl = document.getElementById('daysToContact');
-  if (daysToContact > 0 && isFinite(daysToContact)) {
-    daysEl.textContent = daysToContact.toFixed(1).toLocaleString();
+  const dateEl = document.getElementById('contactDate');
+  if (actualVelocity && distanceKm && distanceKm > 0) {
+    const totalSeconds = distanceKm / actualVelocity;
+    const daysToContact = totalSeconds / SECONDS_PER_DAY;
+    
+    // Debug logging
+    console.log(`Days calculation: distance=${distanceKm.toLocaleString()} km, velocity=${actualVelocity.toFixed(2)} km/s, days=${daysToContact.toFixed(1)}`);
+    
+    if (daysToContact > 0 && isFinite(daysToContact)) {
+      // Calculate the contact date
+      const now = new Date();
+      const contactDate = new Date(now.getTime() + daysToContact * SECONDS_PER_DAY * 1000);
+      const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+                         'July', 'August', 'September', 'October', 'November', 'December'];
+      const month = monthNames[contactDate.getMonth()];
+      const day = contactDate.getDate();
+      const year = contactDate.getFullYear();
+      
+      // Calculate days between today and contact date
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const contact = new Date(contactDate);
+      contact.setHours(0, 0, 0, 0);
+      const daysDifference = Math.round((contact - today) / (1000 * 60 * 60 * 24));
+      
+      daysEl.textContent = daysDifference.toLocaleString();
+      dateEl.textContent = `${month} ${day}, ${year}`;
+    } else {
+      daysEl.textContent = '—';
+      dateEl.textContent = '—';
+    }
   } else {
     daysEl.textContent = '—';
+    dateEl.textContent = '—';
+    if (!actualVelocity) {
+      console.log('Days calculation: No valid velocity available');
+    }
   }
   
   // Draw visualization
@@ -460,6 +543,54 @@ function drawContactVisualization(distanceKm) {
   ctx.lineTo(180 - 18, centerY);
   ctx.stroke();
   ctx.setLineDash([]);
+  
+  // Draw animated dots moving from ship to Earth
+  const earthX = 180 - 18;
+  const shipEndX = shipX + 12;
+  const pathLength = earthX - shipEndX;
+  
+  // Draw multiple dots at different positions along the path
+  const numDots = 3;
+  const dotSpacing = 0.25; // Spacing between dots (as fraction of path)
+  
+  ctx.fillStyle = '#ff6b6b';
+  for (let i = 0; i < numDots; i++) {
+    // Calculate dot position with animation offset
+    const baseProgress = (contactAnimationState.animationTime + i * dotSpacing) % 1;
+    const dotX = shipEndX + baseProgress * pathLength;
+    const dotY = centerY;
+    
+    // Only draw if dot is between ship and Earth
+    if (dotX >= shipEndX && dotX <= earthX) {
+      ctx.beginPath();
+      ctx.arc(dotX, dotY, 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  
+  // Start animation loop if not already running
+  startContactAnimation();
+}
+
+// Animation function for contact visualization dots
+function animateContact() {
+  contactAnimationState.animationTime += 0.015; // Adjust speed (0.01 = slower, 0.05 = faster)
+  if (contactAnimationState.animationTime >= 1) {
+    contactAnimationState.animationTime = 0; // Loop back
+  }
+  
+  // Redraw the visualization
+  if (distanceState.currentDisplayDistance !== null) {
+    drawContactVisualization(distanceState.currentDisplayDistance);
+  }
+  
+  contactAnimationFrame = requestAnimationFrame(animateContact);
+}
+
+function startContactAnimation() {
+  if (contactAnimationFrame === null) {
+    contactAnimationFrame = requestAnimationFrame(animateContact);
+  }
 }
 
 function drawTrackingVisualization(distanceKm) {
@@ -608,16 +739,83 @@ async function fetchDistance() {
         point => now - point.time < twoHoursMs
       );
       
-      // Calculate velocity if we have a previous reading
-      if (distanceState.lastRealDistance !== null && distanceState.lastRealDistanceTime !== null) {
-        const timeDiffSeconds = (now - distanceState.lastRealDistanceTime) / 1000;
-        const distanceDiffKm = distanceState.lastRealDistance - newDistance; // Positive if approaching
-        if (timeDiffSeconds > 0) {
-          distanceState.velocityKmPerSecond = distanceDiffKm / timeDiffSeconds;
-          console.log(`Distance updated: ${newDistance.toLocaleString()} km | Velocity: ${distanceState.velocityKmPerSecond.toFixed(2)} km/s | Time since last fetch: ${timeDiffSeconds.toFixed(1)}s`);
+      // Calculate velocity using trajectory points for better accuracy
+      // Prefer using points with at least 5 minutes of time difference for stability
+      const MIN_TIME_FOR_VELOCITY_SECONDS = 300; // 5 minutes minimum
+      
+      if (distanceState.trajectoryPoints.length >= 2) {
+        const points = distanceState.trajectoryPoints;
+        const newestPoint = points[points.length - 1];
+        
+        // Find the oldest point that's at least MIN_TIME_FOR_VELOCITY_SECONDS ago
+        let bestOldPoint = null;
+        let bestTimeDiff = 0;
+        
+        for (let i = points.length - 2; i >= 0; i--) {
+          const timeDiffSeconds = (newestPoint.time - points[i].time) / 1000;
+          if (timeDiffSeconds >= MIN_TIME_FOR_VELOCITY_SECONDS) {
+            bestOldPoint = points[i];
+            bestTimeDiff = timeDiffSeconds;
+            break;
+          }
+        }
+        
+        // If we have a good point pair, calculate velocity
+        if (bestOldPoint) {
+          const distanceDiffKm = bestOldPoint.distance - newestPoint.distance; // Positive if approaching
+          
+          if (bestTimeDiff > 0 && Math.abs(distanceDiffKm) > 0) {
+            // Calculate velocity (km/s) - use absolute value to ensure positive
+            const calculatedVelocity = Math.abs(distanceDiffKm) / bestTimeDiff;
+            
+            // Only update if we have a reasonable velocity (between 1 and 200 km/s for comets)
+            // This filters out noise from small measurement errors
+            if (calculatedVelocity >= 1 && calculatedVelocity <= 200) {
+              // Track velocity history for acceleration detection
+              distanceState.velocityHistory.push({ time: now, velocity: calculatedVelocity });
+              
+              // Keep only last 10 minutes of velocity history
+              const tenMinutesMs = 10 * 60 * 1000;
+              distanceState.velocityHistory = distanceState.velocityHistory.filter(
+                entry => now - entry.time < tenMinutesMs
+              );
+              
+              distanceState.velocityKmPerSecond = calculatedVelocity;
+              console.log(`Distance updated: ${newDistance.toLocaleString()} km | Velocity: ${distanceState.velocityKmPerSecond.toFixed(2)} km/s | Time window: ${(bestTimeDiff / 60).toFixed(1)} min`);
+              
+              // Update acceleration status
+              updateAccelerationStatus();
+            } else {
+              console.log(`Velocity calculation out of range: ${calculatedVelocity.toFixed(2)} km/s (filtered)`);
+            }
+          }
+        } else if (distanceState.lastRealDistance !== null && distanceState.lastRealDistanceTime !== null) {
+          // Fallback: use last two readings if we don't have enough history yet
+          const timeDiffSeconds = (now - distanceState.lastRealDistanceTime) / 1000;
+          const distanceDiffKm = distanceState.lastRealDistance - newDistance;
+          
+          if (timeDiffSeconds >= 60 && Math.abs(distanceDiffKm) > 0) { // At least 1 minute
+            const calculatedVelocity = Math.abs(distanceDiffKm) / timeDiffSeconds;
+            if (calculatedVelocity >= 1 && calculatedVelocity <= 200) {
+              // Track velocity history for acceleration detection
+              distanceState.velocityHistory.push({ time: now, velocity: calculatedVelocity });
+              
+              // Keep only last 10 minutes of velocity history
+              const tenMinutesMs = 10 * 60 * 1000;
+              distanceState.velocityHistory = distanceState.velocityHistory.filter(
+                entry => now - entry.time < tenMinutesMs
+              );
+              
+              distanceState.velocityKmPerSecond = calculatedVelocity;
+              console.log(`Distance updated: ${newDistance.toLocaleString()} km | Velocity: ${distanceState.velocityKmPerSecond.toFixed(2)} km/s | Time window: ${(timeDiffSeconds / 60).toFixed(1)} min (fallback)`);
+              
+              // Update acceleration status
+              updateAccelerationStatus();
+            }
+          }
         }
       } else {
-        console.log(`Initial distance: ${newDistance.toLocaleString()} km`);
+        console.log(`Initial distance: ${newDistance.toLocaleString()} km (need more points for velocity)`);
       }
       
       // Update the state with new real distance
@@ -633,6 +831,46 @@ async function fetchDistance() {
   }
 }
 
+function updateAccelerationStatus() {
+  const statusEl = document.getElementById('accelerationStatus');
+  if (!statusEl) return;
+  
+  // Need at least 2 velocity measurements to detect acceleration/deceleration
+  if (distanceState.velocityHistory.length < 2) {
+    statusEl.textContent = '';
+    return;
+  }
+  
+  const history = distanceState.velocityHistory;
+  const recentCount = Math.min(5, history.length); // Use last 5 measurements
+  const recentVelocities = history.slice(-recentCount);
+  
+  // Calculate average velocity for older half vs newer half
+  const midPoint = Math.floor(recentVelocities.length / 2);
+  const olderVelocities = recentVelocities.slice(0, midPoint);
+  const newerVelocities = recentVelocities.slice(midPoint);
+  
+  if (olderVelocities.length === 0 || newerVelocities.length === 0) {
+    statusEl.textContent = '';
+    return;
+  }
+  
+  const avgOlder = olderVelocities.reduce((sum, v) => sum + v.velocity, 0) / olderVelocities.length;
+  const avgNewer = newerVelocities.reduce((sum, v) => sum + v.velocity, 0) / newerVelocities.length;
+  
+  // Threshold: velocity change must be at least 0.5 km/s to be significant
+  const velocityDiff = avgNewer - avgOlder;
+  const threshold = 0.5;
+  
+  if (velocityDiff > threshold) {
+    statusEl.textContent = 'Accelerating';
+  } else if (velocityDiff < -threshold) {
+    statusEl.textContent = 'Decelerating';
+  } else {
+    statusEl.textContent = '';
+  }
+}
+
 function updateDistanceDisplay(distanceKm) {
   const distEl = document.getElementById('distanceValue');
   distEl.textContent = distanceKm.toLocaleString('en-US', { maximumFractionDigits: 0 });
@@ -642,7 +880,7 @@ function updateDistanceDisplay(distanceKm) {
 }
 
 function interpolateDistance() {
-  if (distanceState.lastRealDistanceTime === null) {
+  if (distanceState.lastRealDistanceTime === null || distanceState.velocityKmPerSecond === null) {
     return;
   }
   
@@ -650,6 +888,7 @@ function interpolateDistance() {
   const timeSinceLastFetchSeconds = (now - distanceState.lastRealDistanceTime) / 1000;
   
   // Calculate interpolated distance based on velocity
+  // Velocity is positive (approaching), so distance decreases
   const distanceChange = distanceState.velocityKmPerSecond * timeSinceLastFetchSeconds;
   const interpolatedDistance = distanceState.lastRealDistance - distanceChange;
   
@@ -714,6 +953,620 @@ async function fetchLatest() {
   distanceTimer = setInterval(fetchDistance, DISTANCE_POLL_SECONDS * 1000);
   // Interpolate distance display every second
   distanceDisplayTimer = setInterval(interpolateDistance, DISTANCE_DISPLAY_INTERVAL);
+})();
+
+// ===== ASTEROID GAME BACKGROUND ANIMATION =====
+(function() {
+  const canvas = document.getElementById('asteroidCanvas');
+  const ctx = canvas.getContext('2d');
+  
+  // Set canvas size to match window
+  function resizeCanvas() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+  }
+  resizeCanvas();
+  window.addEventListener('resize', resizeCanvas);
+  
+  // Game state
+  const ship = {
+    x: canvas.width / 2,
+    y: canvas.height / 2,
+    angle: 0,
+    velocity: { x: 0, y: 0 },
+    size: 15,
+    thrust: false,
+    rotation: 0,
+    exploded: false,
+    respawnTime: 0
+  };
+  
+  const asteroids = [];
+  const bullets = [];
+  const particles = [];
+  const stars = [];
+  const ufos = [];
+  const ufoBullets = [];
+  let lastHugeAsteroidTime = Date.now();
+  const HUGE_ASTEROID_INTERVAL = 13800; // ~14 seconds (15% less frequent)
+  let lastUfoTime = Date.now();
+  let nextUfoInterval = 20000 + Math.random() * 15000; // 20-35 seconds
+  let lastHyperspaceTime = 0;
+  const HYPERSPACE_COOLDOWN = 8000; // 8 seconds
+  
+  // Create background stars
+  for (let i = 0; i < 150; i++) {
+    stars.push({
+      x: Math.random() * canvas.width,
+      y: Math.random() * canvas.height,
+      size: Math.random() * 1.5 + 0.5,
+      opacity: Math.random() * 0.5 + 0.3
+    });
+  }
+  
+  // Create initial asteroids
+  function createAsteroid(x, y, size, velocity) {
+    return {
+      x: x || Math.random() * canvas.width,
+      y: y || Math.random() * canvas.height,
+      velocity: velocity || {
+        x: (Math.random() - 0.5) * 2,
+        y: (Math.random() - 0.5) * 2
+      },
+      size: size || Math.random() * 30 + 20,
+      angle: Math.random() * Math.PI * 2,
+      rotation: (Math.random() - 0.5) * 0.05,
+      points: generateAsteroidShape()
+    };
+  }
+  
+  // Create huge asteroid entering from edge
+  function spawnHugeAsteroid() {
+    const edge = Math.floor(Math.random() * 4); // 0=top, 1=right, 2=bottom, 3=left
+    let x, y, velocity;
+    const speed = 3 + Math.random() * 2; // Faster than normal
+    const size = 80 + Math.random() * 40; // Much larger (80-120)
+    
+    if (edge === 0) { // top
+      x = Math.random() * canvas.width;
+      y = -size;
+      velocity = { x: (Math.random() - 0.5) * 2, y: speed };
+    } else if (edge === 1) { // right
+      x = canvas.width + size;
+      y = Math.random() * canvas.height;
+      velocity = { x: -speed, y: (Math.random() - 0.5) * 2 };
+    } else if (edge === 2) { // bottom
+      x = Math.random() * canvas.width;
+      y = canvas.height + size;
+      velocity = { x: (Math.random() - 0.5) * 2, y: -speed };
+    } else { // left
+      x = -size;
+      y = Math.random() * canvas.height;
+      velocity = { x: speed, y: (Math.random() - 0.5) * 2 };
+    }
+    
+    asteroids.push(createAsteroid(x, y, size, velocity));
+    console.log(`Huge asteroid spawned! Size: ${size.toFixed(0)}`);
+  }
+  
+  // Spawn UFO
+  function spawnUfo() {
+    const edge = Math.floor(Math.random() * 2); // 0=left, 1=right
+    const y = Math.random() * (canvas.height * 0.8) + canvas.height * 0.1; // Middle 80% of screen
+    let x, velocityX;
+    
+    if (edge === 0) { // left side, moving right
+      x = -60;
+      velocityX = 4 + Math.random() * 2;
+    } else { // right side, moving left
+      x = canvas.width + 60;
+      velocityX = -(4 + Math.random() * 2);
+    }
+    
+    ufos.push({
+      x,
+      y,
+      velocityX,
+      size: 30,
+      bobOffset: Math.random() * Math.PI * 2,
+      glowPhase: 0,
+      lastShotTime: Date.now()
+    });
+    console.log('UFO spawned!');
+  }
+  
+  // Update UFOs
+  function updateUfos() {
+    ufos.forEach((ufo, index) => {
+      ufo.x += ufo.velocityX;
+      ufo.bobOffset += 0.05;
+      ufo.glowPhase += 0.1;
+      
+      // Shoot at ship if not exploded and on screen
+      if (!ship.exploded && ufo.x > 0 && ufo.x < canvas.width) {
+        const now = Date.now();
+        if (now - ufo.lastShotTime > 1500) { // Shoot every 1.5 seconds
+          const bobY = ufo.y + Math.sin(ufo.bobOffset) * 5;
+          const dx = ship.x - ufo.x;
+          const dy = ship.y - bobY;
+          const angle = Math.atan2(dy, dx);
+          
+          ufoBullets.push({
+            x: ufo.x,
+            y: bobY,
+            velocity: {
+              x: Math.cos(angle) * 4,
+              y: Math.sin(angle) * 4
+            },
+            life: 120
+          });
+          ufo.lastShotTime = now;
+        }
+      }
+      
+      // Remove if off screen
+      if (ufo.x < -100 || ufo.x > canvas.width + 100) {
+        ufos.splice(index, 1);
+      }
+    });
+  }
+  
+  // Update UFO bullets
+  function updateUfoBullets() {
+    ufoBullets.forEach((bullet, index) => {
+      bullet.x += bullet.velocity.x;
+      bullet.y += bullet.velocity.y;
+      bullet.life--;
+      
+      // Check collision with ship
+      if (!ship.exploded) {
+        const dx = bullet.x - ship.x;
+        const dy = bullet.y - ship.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        
+        if (dist < ship.size) {
+          // Ship hit by UFO bullet!
+          ship.exploded = true;
+          ship.respawnTime = Date.now() + 3000;
+          createParticles(ship.x, ship.y, 30);
+          ufoBullets.splice(index, 1);
+          console.log('Ship destroyed by UFO!');
+          return;
+        }
+      }
+      
+      if (bullet.life <= 0 || bullet.x < 0 || bullet.x > canvas.width || 
+          bullet.y < 0 || bullet.y > canvas.height) {
+        ufoBullets.splice(index, 1);
+      }
+    });
+  }
+  
+  // Draw UFOs
+  function drawUfos() {
+    ufos.forEach(ufo => {
+      const bobY = ufo.y + Math.sin(ufo.bobOffset) * 5;
+      
+      ctx.save();
+      ctx.translate(ufo.x, bobY);
+      
+      // Glow effect
+      const glowIntensity = 0.3 + Math.sin(ufo.glowPhase) * 0.2;
+      ctx.shadowColor = `rgba(126, 240, 163, ${glowIntensity})`;
+      ctx.shadowBlur = 20;
+      
+      // UFO dome (top)
+      ctx.fillStyle = 'rgba(126, 240, 163, 0.7)';
+      ctx.beginPath();
+      ctx.ellipse(0, -5, ufo.size * 0.4, ufo.size * 0.3, 0, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // UFO body (disc)
+      ctx.fillStyle = 'rgba(126, 200, 255, 0.6)';
+      ctx.strokeStyle = 'rgba(126, 240, 163, 0.8)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, ufo.size, ufo.size * 0.3, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      
+      // Windows
+      ctx.fillStyle = 'rgba(255, 255, 100, 0.9)';
+      for (let i = 0; i < 5; i++) {
+        const angle = (i / 5) * Math.PI * 2;
+        const wx = Math.cos(angle) * ufo.size * 0.5;
+        const wy = Math.sin(angle) * ufo.size * 0.15;
+        ctx.beginPath();
+        ctx.arc(wx, wy, 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      
+      // Light beam (occasionally)
+      if (Math.sin(ufo.glowPhase) > 0.5) {
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = 'rgba(126, 240, 163, 0.15)';
+        ctx.beginPath();
+        ctx.moveTo(-10, ufo.size * 0.3);
+        ctx.lineTo(-15, 80);
+        ctx.lineTo(15, 80);
+        ctx.lineTo(10, ufo.size * 0.3);
+        ctx.closePath();
+        ctx.fill();
+      }
+      
+      ctx.restore();
+    });
+  }
+  
+  function generateAsteroidShape() {
+    const points = [];
+    const numPoints = Math.floor(Math.random() * 4) + 6;
+    for (let i = 0; i < numPoints; i++) {
+      const angle = (i / numPoints) * Math.PI * 2;
+      const radius = 0.7 + Math.random() * 0.3;
+      points.push({ angle, radius });
+    }
+    return points;
+  }
+  
+  // Initialize asteroids
+  for (let i = 0; i < 8; i++) {
+    asteroids.push(createAsteroid());
+  }
+  
+  // Create particle effect
+  function createParticles(x, y, count) {
+    for (let i = 0; i < count; i++) {
+      particles.push({
+        x,
+        y,
+        velocity: {
+          x: (Math.random() - 0.5) * 4,
+          y: (Math.random() - 0.5) * 4
+        },
+        life: 1,
+        size: Math.random() * 2 + 1
+      });
+    }
+  }
+  
+  // Autonomous ship AI
+  function updateShipAI() {
+    // Check if ship should respawn
+    if (ship.exploded) {
+      if (Date.now() >= ship.respawnTime) {
+        ship.exploded = false;
+        ship.x = canvas.width / 2;
+        ship.y = canvas.height / 2;
+        ship.velocity = { x: 0, y: 0 };
+        ship.angle = 0;
+        console.log('Ship respawned!');
+      }
+      return; // Don't update AI while exploded
+    }
+    
+    // Find nearest asteroid
+    let nearest = null;
+    let nearestDist = Infinity;
+    
+    asteroids.forEach(asteroid => {
+      const dx = asteroid.x - ship.x;
+      const dy = asteroid.y - ship.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < nearestDist) {
+        nearestDist = dist;
+        nearest = asteroid;
+      }
+    });
+    
+    if (nearest) {
+      // Aim at nearest asteroid
+      const dx = nearest.x - ship.x;
+      const dy = nearest.y - ship.y;
+      const targetAngle = Math.atan2(dy, dx);
+      
+      // Smooth rotation toward target
+      let angleDiff = targetAngle - ship.angle;
+      while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+      while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+      
+      ship.angle += angleDiff * 0.05;
+      
+      // Shoot periodically
+      if (Math.random() < 0.02 && Math.abs(angleDiff) < 0.3) {
+        bullets.push({
+          x: ship.x + Math.cos(ship.angle) * ship.size,
+          y: ship.y + Math.sin(ship.angle) * ship.size,
+          velocity: {
+            x: Math.cos(ship.angle) * 6,
+            y: Math.sin(ship.angle) * 6
+          },
+          life: 60
+        });
+      }
+      
+      // Thrust occasionally
+      ship.thrust = Math.random() < 0.3;
+      if (ship.thrust) {
+        ship.velocity.x += Math.cos(ship.angle) * 0.1;
+        ship.velocity.y += Math.sin(ship.angle) * 0.1;
+      }
+      
+      // Use hyperspace in dangerous situations
+      const now = Date.now();
+      if (now - lastHyperspaceTime > HYPERSPACE_COOLDOWN) {
+        // Check if in danger (nearby large asteroid or UFO bullets)
+        let inDanger = false;
+        
+        asteroids.forEach(asteroid => {
+          if (asteroid.size > 50) {
+            const dx = asteroid.x - ship.x;
+            const dy = asteroid.y - ship.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < 100) inDanger = true;
+          }
+        });
+        
+        ufoBullets.forEach(bullet => {
+          const dx = bullet.x - ship.x;
+          const dy = bullet.y - ship.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < 80) inDanger = true;
+        });
+        
+        if (inDanger && Math.random() < 0.1) {
+          // Activate hyperspace!
+          createParticles(ship.x, ship.y, 15);
+          ship.x = Math.random() * canvas.width;
+          ship.y = Math.random() * canvas.height;
+          ship.velocity.x = 0;
+          ship.velocity.y = 0;
+          createParticles(ship.x, ship.y, 15);
+          lastHyperspaceTime = now;
+          console.log('Hyperspace jump!');
+        }
+      }
+    }
+    
+    // Apply velocity and friction
+    ship.velocity.x *= 0.99;
+    ship.velocity.y *= 0.99;
+    ship.x += ship.velocity.x;
+    ship.y += ship.velocity.y;
+    
+    // Wrap around screen
+    if (ship.x < 0) ship.x = canvas.width;
+    if (ship.x > canvas.width) ship.x = 0;
+    if (ship.y < 0) ship.y = canvas.height;
+    if (ship.y > canvas.height) ship.y = 0;
+  }
+  
+  // Update asteroids
+  function updateAsteroids() {
+    asteroids.forEach((asteroid, index) => {
+      asteroid.x += asteroid.velocity.x;
+      asteroid.y += asteroid.velocity.y;
+      asteroid.angle += asteroid.rotation;
+      
+      // Wrap around screen
+      if (asteroid.x < -50) asteroid.x = canvas.width + 50;
+      if (asteroid.x > canvas.width + 50) asteroid.x = -50;
+      if (asteroid.y < -50) asteroid.y = canvas.height + 50;
+      if (asteroid.y > canvas.height + 50) asteroid.y = -50;
+      
+      // Check collision with ship (only large asteroids)
+      if (!ship.exploded && asteroid.size > 50) {
+        const dx = ship.x - asteroid.x;
+        const dy = ship.y - asteroid.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        
+        if (dist < asteroid.size + ship.size) {
+          // Ship explodes!
+          ship.exploded = true;
+          ship.respawnTime = Date.now() + 3000; // Respawn after 3 seconds
+          createParticles(ship.x, ship.y, 30);
+          console.log('Ship destroyed by large asteroid!');
+        }
+      }
+      
+      // Check collision with bullets
+      bullets.forEach((bullet, bIndex) => {
+        const dx = bullet.x - asteroid.x;
+        const dy = bullet.y - asteroid.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        
+        if (dist < asteroid.size) {
+          // Hit!
+          createParticles(asteroid.x, asteroid.y, 10);
+          bullets.splice(bIndex, 1);
+          
+          // Split asteroid if large enough
+          if (asteroid.size > 15) {
+            asteroids.push(createAsteroid(asteroid.x, asteroid.y, asteroid.size / 2));
+            asteroids.push(createAsteroid(asteroid.x, asteroid.y, asteroid.size / 2));
+          }
+          asteroids.splice(index, 1);
+        }
+      });
+    });
+    
+    // Maintain minimum asteroid count
+    while (asteroids.length < 6) {
+      const edge = Math.floor(Math.random() * 4);
+      let x, y;
+      if (edge === 0) { x = Math.random() * canvas.width; y = -50; }
+      else if (edge === 1) { x = canvas.width + 50; y = Math.random() * canvas.height; }
+      else if (edge === 2) { x = Math.random() * canvas.width; y = canvas.height + 50; }
+      else { x = -50; y = Math.random() * canvas.height; }
+      asteroids.push(createAsteroid(x, y));
+    }
+  }
+  
+  // Update bullets
+  function updateBullets() {
+    bullets.forEach((bullet, index) => {
+      bullet.x += bullet.velocity.x;
+      bullet.y += bullet.velocity.y;
+      bullet.life--;
+      
+      if (bullet.life <= 0 || bullet.x < 0 || bullet.x > canvas.width || 
+          bullet.y < 0 || bullet.y > canvas.height) {
+        bullets.splice(index, 1);
+      }
+    });
+  }
+  
+  // Update particles
+  function updateParticles() {
+    particles.forEach((particle, index) => {
+      particle.x += particle.velocity.x;
+      particle.y += particle.velocity.y;
+      particle.life -= 0.02;
+      
+      if (particle.life <= 0) {
+        particles.splice(index, 1);
+      }
+    });
+  }
+  
+  // Draw functions
+  function drawStars() {
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+    stars.forEach(star => {
+      ctx.globalAlpha = star.opacity;
+      ctx.fillRect(star.x, star.y, star.size, star.size);
+    });
+    ctx.globalAlpha = 1;
+  }
+  
+  function drawShip() {
+    if (ship.exploded) return; // Don't draw if exploded
+    
+    ctx.save();
+    ctx.translate(ship.x, ship.y);
+    ctx.rotate(ship.angle);
+    
+    // Ship body (triangle)
+    ctx.strokeStyle = 'rgba(126, 240, 163, 0.6)';
+    ctx.fillStyle = 'rgba(126, 240, 163, 0.1)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(ship.size, 0);
+    ctx.lineTo(-ship.size, -ship.size / 2);
+    ctx.lineTo(-ship.size, ship.size / 2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    
+    // Thrust flame
+    if (ship.thrust) {
+      ctx.fillStyle = 'rgba(255, 107, 107, 0.6)';
+      ctx.beginPath();
+      ctx.moveTo(-ship.size, -ship.size / 3);
+      ctx.lineTo(-ship.size - 10, 0);
+      ctx.lineTo(-ship.size, ship.size / 3);
+      ctx.closePath();
+      ctx.fill();
+    }
+    
+    ctx.restore();
+  }
+  
+  function drawAsteroids() {
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+    ctx.lineWidth = 2;
+    
+    asteroids.forEach(asteroid => {
+      ctx.save();
+      ctx.translate(asteroid.x, asteroid.y);
+      ctx.rotate(asteroid.angle);
+      
+      ctx.beginPath();
+      asteroid.points.forEach((point, i) => {
+        const x = Math.cos(point.angle) * asteroid.size * point.radius;
+        const y = Math.sin(point.angle) * asteroid.size * point.radius;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      
+      ctx.restore();
+    });
+  }
+  
+  function drawBullets() {
+    ctx.fillStyle = 'rgba(126, 200, 255, 0.8)';
+    bullets.forEach(bullet => {
+      ctx.beginPath();
+      ctx.arc(bullet.x, bullet.y, 2, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  }
+  
+  function drawUfoBullets() {
+    ctx.fillStyle = 'rgba(255, 107, 107, 0.8)';
+    ctx.shadowColor = 'rgba(255, 107, 107, 0.5)';
+    ctx.shadowBlur = 10;
+    ufoBullets.forEach(bullet => {
+      ctx.beginPath();
+      ctx.arc(bullet.x, bullet.y, 3, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.shadowBlur = 0;
+  }
+  
+  function drawParticles() {
+    particles.forEach(particle => {
+      ctx.fillStyle = `rgba(255, 255, 255, ${particle.life * 0.6})`;
+      ctx.fillRect(particle.x, particle.y, particle.size, particle.size);
+    });
+  }
+  
+  // Main game loop
+  function gameLoop() {
+    // Clear canvas
+    ctx.fillStyle = 'rgba(8, 16, 26, 0.1)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // Spawn huge asteroid periodically
+    const now = Date.now();
+    if (now - lastHugeAsteroidTime >= HUGE_ASTEROID_INTERVAL) {
+      spawnHugeAsteroid();
+      lastHugeAsteroidTime = now;
+    }
+    
+    // Spawn UFO randomly
+    if (now - lastUfoTime >= nextUfoInterval) {
+      spawnUfo();
+      lastUfoTime = now;
+      nextUfoInterval = 20000 + Math.random() * 15000; // New random interval for next UFO
+    }
+    
+    // Update
+    updateShipAI();
+    updateAsteroids();
+    updateUfos();
+    updateUfoBullets();
+    updateBullets();
+    updateParticles();
+    
+    // Draw
+    drawStars();
+    drawAsteroids();
+    drawUfos();
+    drawUfoBullets();
+    drawShip();
+    drawBullets();
+    drawParticles();
+    
+    requestAnimationFrame(gameLoop);
+  }
+  
+  // Start the game
+  gameLoop();
 })();
 </script>
 </body>
