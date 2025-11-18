@@ -585,7 +585,7 @@
 
         <div class="observations">
           <h3>Observations (latest first)</h3>
-          <div class="sub">Auto-refresh: every 6 hours</div>
+          <div class="sub">Auto-refresh: every 1 hour</div>
           <div class="history-table">
             <table id="historyTable">
               <thead>
@@ -691,13 +691,17 @@ function updateUIFromEntry(entry) {
     statusEl.className = 'mag-status';
   }
 
-  // Detect magnitude trend (Brighter/Closer if decreases, Dimmer if increases)
+  // Detect magnitude trend (Brighter! if decreases, Dimmer if increases, Increasing/Decreasing for direction)
   if (previousDisplayedMag !== null && previousDisplayedMag !== mag) {
+    const magDifference = Math.abs(mag - previousDisplayedMag).toFixed(2);
+    
     if (mag < previousDisplayedMag) {
-      trendEl.textContent = 'Brighter / Closer';
+      // Magnitude decreased = gets brighter (lower mag number = brighter)
+      trendEl.textContent = `↑ Brighter! (−${magDifference})`;
       trendEl.className = 'magnitude-trend brighter';
     } else if (mag > previousDisplayedMag) {
-      trendEl.textContent = 'Dimmer';
+      // Magnitude increased = gets dimmer (higher mag number = dimmer)
+      trendEl.textContent = `↓ Dimmer (+${magDifference})`;
       trendEl.className = 'magnitude-trend dimmer';
     } else {
       trendEl.textContent = '';
