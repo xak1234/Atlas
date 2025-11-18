@@ -1,6 +1,8 @@
-# 3I / ATLAS Brightness Tracker
+# 3I / ATLAS Brightness Tracker / Screen Saver / Asteroid Play
 
 ![ATLAS](Atlas.png)
+
+Tongue In Cheek
 
 ## Overview
 Real-time tracking and visualization system for monitoring Anomoly C/2025 N1 (ATLAS), with live magnitude data, distance calculations, and predicted closest approach dates. The application features an interactive asteroid game visualization running in the background.
