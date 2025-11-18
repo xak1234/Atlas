@@ -1238,9 +1238,9 @@ async function fetchLatest() {
     return points;
   }
   
-  // Initialize asteroids
-  for (let i = 0; i < 8; i++) {
-    asteroids.push(createAsteroid());
+  // Initialize asteroids (4 small ones)
+  for (let i = 0; i < 4; i++) {
+    asteroids.push(createAsteroid(null, null, Math.random() * 20 + 15)); // Small: 15-35px
   }
   
   // Create particle effect
@@ -1419,15 +1419,30 @@ async function fetchLatest() {
       });
     });
     
-    // Maintain minimum asteroid count
-    while (asteroids.length < 6) {
+    // Maintain asteroid count: max 3 large (>40px) and 4 small (<=40px)
+    const largeAsteroids = asteroids.filter(a => a.size > 40);
+    const smallAsteroids = asteroids.filter(a => a.size <= 40);
+    
+    // Add small asteroids if needed (max 4)
+    while (smallAsteroids.length < 4) {
       const edge = Math.floor(Math.random() * 4);
       let x, y;
       if (edge === 0) { x = Math.random() * canvas.width; y = -50; }
       else if (edge === 1) { x = canvas.width + 50; y = Math.random() * canvas.height; }
       else if (edge === 2) { x = Math.random() * canvas.width; y = canvas.height + 50; }
       else { x = -50; y = Math.random() * canvas.height; }
-      asteroids.push(createAsteroid(x, y));
+      const size = Math.random() * 20 + 15; // Small: 15-35px
+      asteroids.push(createAsteroid(x, y, size));
+      smallAsteroids.push(asteroids[asteroids.length - 1]);
+    }
+    
+    // Remove excess large asteroids (keep max 3)
+    while (largeAsteroids.length > 3) {
+      const index = asteroids.indexOf(largeAsteroids[largeAsteroids.length - 1]);
+      if (index > -1) {
+        asteroids.splice(index, 1);
+        largeAsteroids.pop();
+      }
     }
   }
   

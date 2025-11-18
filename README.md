@@ -1,7 +1,7 @@
 # 3I / ATLAS Brightness Tracker
 
 ## Overview
-Real-time tracking and visualization system for monitoring comet C/2025 N1 (ATLAS), with live magnitude data, distance calculations, and predicted closest approach dates. The application features an interactive asteroid game visualization running in the background.
+Real-time tracking and visualization system for monitoring Anomoly C/2025 N1 (ATLAS), with live magnitude data, distance calculations, and predicted closest approach dates. The application features an interactive asteroid game visualization running in the background.
 
 ## 🌟 Project Purpose
 
