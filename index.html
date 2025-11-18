@@ -279,6 +279,155 @@
       border-radius: 3px;
     }
 
+    /* Joystick Control Panel */
+    #controlPanel {
+      position: fixed;
+      bottom: 15px;
+      right: 15px;
+      display: none;
+      z-index: 1000;
+      background: rgba(15, 27, 42, 0.95);
+      border-radius: 8px;
+      padding: 10px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.8);
+      border: 1px solid rgba(126, 200, 255, 0.3);
+    }
+
+    #controlPanel.active {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      animation: panelFadeIn 0.3s ease-out;
+    }
+
+    @keyframes panelFadeIn {
+      from {
+        opacity: 0;
+        transform: scale(0.8);
+      }
+      to {
+        opacity: 1;
+        transform: scale(1);
+      }
+    }
+
+    .joystick-container {
+      display: grid;
+      grid-template-columns: repeat(3, 30px);
+      grid-template-rows: repeat(3, 30px);
+      gap: 4px;
+    }
+
+    .direction-btn {
+      background: rgba(126, 200, 255, 0.2);
+      border: 1px solid rgba(126, 200, 255, 0.5);
+      border-radius: 4px;
+      color: #7ec8ff;
+      font-size: 12px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s ease;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .direction-btn:active {
+      background: rgba(126, 200, 255, 0.5);
+      transform: scale(0.95);
+    }
+
+    .direction-btn.up { grid-column: 2; grid-row: 1; }
+    .direction-btn.left { grid-column: 1; grid-row: 2; }
+    .direction-btn.right { grid-column: 3; grid-row: 2; }
+    .direction-btn.down { grid-column: 2; grid-row: 3; }
+
+    .fire-btn {
+      width: 50px;
+      height: 50px;
+      background: linear-gradient(145deg, #ff6b6b, #ff4444);
+      border: 2px solid rgba(255, 107, 107, 0.8);
+      border-radius: 50%;
+      color: white;
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: uppercase;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 2px 6px rgba(255, 107, 107, 0.5);
+      transition: all 0.15s ease;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .fire-btn:active {
+      background: linear-gradient(145deg, #ff4444, #ff2222);
+      transform: scale(0.95);
+      box-shadow: 0 1px 3px rgba(255, 107, 107, 0.7);
+    }
+
+    .close-panel-btn {
+      position: absolute;
+      top: 5px;
+      right: 5px;
+      width: 15px;
+      height: 15px;
+      background: rgba(255, 107, 107, 0.3);
+      border: 1px solid rgba(255, 107, 107, 0.5);
+      border-radius: 50%;
+      color: #ff9b9b;
+      font-size: 9px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s ease;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .close-panel-btn:active {
+      background: rgba(255, 107, 107, 0.5);
+      transform: scale(0.95);
+    }
+
+    .drag-handle {
+      position: absolute;
+      top: 5px;
+      left: 5px;
+      width: 20px;
+      height: 20px;
+      background: rgba(126, 200, 255, 0.3);
+      border: 1px solid rgba(126, 200, 255, 0.5);
+      border-radius: 4px;
+      cursor: move;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 2px;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .drag-handle::before,
+    .drag-handle::after {
+      content: '';
+      width: 12px;
+      height: 2px;
+      background: rgba(126, 200, 255, 0.6);
+      border-radius: 1px;
+    }
+
+    .drag-handle:active {
+      background: rgba(126, 200, 255, 0.5);
+      cursor: grabbing;
+    }
+
     @media (max-width: 720px) {
       .content {
         grid-template-columns: 1fr;
@@ -286,11 +435,76 @@
       body {
         padding: 16px;
       }
+      
+      /* Optimize joystick for mobile */
+      #controlPanel {
+        bottom: 20px;
+        right: 20px;
+        padding: 15px;
+        border-radius: 12px;
+      }
+      
+      .joystick-container {
+        grid-template-columns: repeat(3, 50px);
+        grid-template-rows: repeat(3, 50px);
+        gap: 6px;
+      }
+      
+      .direction-btn {
+        font-size: 20px;
+        border-radius: 6px;
+        border: 2px solid rgba(126, 200, 255, 0.5);
+      }
+      
+      .fire-btn {
+        width: 80px;
+        height: 80px;
+        font-size: 14px;
+        border: 3px solid rgba(255, 107, 107, 0.8);
+        box-shadow: 0 3px 10px rgba(255, 107, 107, 0.5);
+      }
+      
+      .close-panel-btn {
+        width: 24px;
+        height: 24px;
+        font-size: 14px;
+        top: 8px;
+        right: 8px;
+        border: 2px solid rgba(255, 107, 107, 0.5);
+      }
+      
+      .drag-handle {
+        width: 28px;
+        height: 28px;
+        top: 8px;
+        left: 8px;
+        border: 2px solid rgba(126, 200, 255, 0.5);
+        border-radius: 6px;
+      }
+      
+      .drag-handle::before,
+      .drag-handle::after {
+        width: 16px;
+        height: 3px;
+      }
     }
   </style>
 </head>
 <body>
   <canvas id="asteroidCanvas"></canvas>
+  
+  <!-- Joystick Control Panel -->
+  <div id="controlPanel">
+    <div class="drag-handle" id="dragHandle"></div>
+    <div class="close-panel-btn" id="closePanelBtn">×</div>
+    <div class="joystick-container">
+      <button class="direction-btn up" id="upBtn">▲</button>
+      <button class="direction-btn left" id="leftBtn">◄</button>
+      <button class="direction-btn right" id="rightBtn">►</button>
+      <button class="direction-btn down" id="downBtn">▼</button>
+    </div>
+    <button class="fire-btn" id="fireBtn">FIRE</button>
+  </div>
   <div class="container">
     <div class="card">
       <header>
@@ -984,6 +1198,153 @@ async function fetchLatest() {
   distanceDisplayTimer = setInterval(interpolateDistance, DISTANCE_DISPLAY_INTERVAL);
 })();
 
+// ===== DOUBLE-TAP JOYSTICK CONTROL SYSTEM =====
+(function() {
+  let lastTapTime = 0;
+  const DOUBLE_TAP_DELAY = 300; // milliseconds
+  const controlPanel = document.getElementById('controlPanel');
+  const closePanelBtn = document.getElementById('closePanelBtn');
+  const dragHandle = document.getElementById('dragHandle');
+  let isManualControl = false;
+  
+  // Drag state
+  let isDragging = false;
+  let dragOffsetX = 0;
+  let dragOffsetY = 0;
+  
+  // Double-tap detection
+  document.addEventListener('touchstart', function(e) {
+    const now = Date.now();
+    const timeSince = now - lastTapTime;
+    
+    if (timeSince < DOUBLE_TAP_DELAY && timeSince > 0) {
+      // Double tap detected!
+      if (controlPanel.classList.contains('active')) {
+        controlPanel.classList.remove('active');
+        isManualControl = false;
+      } else {
+        controlPanel.classList.add('active');
+        isManualControl = true;
+      }
+    }
+    
+    lastTapTime = now;
+  });
+  
+  // Close button
+  closePanelBtn.addEventListener('click', function() {
+    controlPanel.classList.remove('active');
+    isManualControl = false;
+  });
+  
+  // Drag functionality
+  function startDrag(e) {
+    e.preventDefault();
+    isDragging = true;
+    
+    const rect = controlPanel.getBoundingClientRect();
+    const clientX = e.type.includes('touch') ? e.touches[0].clientX : e.clientX;
+    const clientY = e.type.includes('touch') ? e.touches[0].clientY : e.clientY;
+    
+    dragOffsetX = clientX - rect.left;
+    dragOffsetY = clientY - rect.top;
+    
+    dragHandle.style.cursor = 'grabbing';
+  }
+  
+  function drag(e) {
+    if (!isDragging) return;
+    e.preventDefault();
+    
+    const clientX = e.type.includes('touch') ? e.touches[0].clientX : e.clientX;
+    const clientY = e.type.includes('touch') ? e.touches[0].clientY : e.clientY;
+    
+    let newLeft = clientX - dragOffsetX;
+    let newTop = clientY - dragOffsetY;
+    
+    // Keep panel within viewport bounds
+    const maxLeft = window.innerWidth - controlPanel.offsetWidth;
+    const maxTop = window.innerHeight - controlPanel.offsetHeight;
+    
+    newLeft = Math.max(0, Math.min(newLeft, maxLeft));
+    newTop = Math.max(0, Math.min(newTop, maxTop));
+    
+    controlPanel.style.left = newLeft + 'px';
+    controlPanel.style.top = newTop + 'px';
+    controlPanel.style.right = 'auto';
+    controlPanel.style.bottom = 'auto';
+  }
+  
+  function stopDrag(e) {
+    if (isDragging) {
+      e.preventDefault();
+      isDragging = false;
+      dragHandle.style.cursor = 'move';
+    }
+  }
+  
+  // Touch events
+  dragHandle.addEventListener('touchstart', startDrag);
+  document.addEventListener('touchmove', drag);
+  document.addEventListener('touchend', stopDrag);
+  
+  // Mouse events
+  dragHandle.addEventListener('mousedown', startDrag);
+  document.addEventListener('mousemove', drag);
+  document.addEventListener('mouseup', stopDrag);
+  
+  // Joystick controls
+  const upBtn = document.getElementById('upBtn');
+  const downBtn = document.getElementById('downBtn');
+  const leftBtn = document.getElementById('leftBtn');
+  const rightBtn = document.getElementById('rightBtn');
+  const fireBtn = document.getElementById('fireBtn');
+  
+  // Export manual control state and button states for game to use
+  window.joystickControl = {
+    isManualControl: () => isManualControl,
+    getThrust: () => false,
+    getRotation: () => 0,
+    getFire: () => false,
+    pressedButtons: {
+      up: false,
+      down: false,
+      left: false,
+      right: false,
+      fire: false
+    }
+  };
+  
+  // Button event handlers
+  function setupButton(btn, key) {
+    btn.addEventListener('touchstart', function(e) {
+      e.preventDefault();
+      window.joystickControl.pressedButtons[key] = true;
+    });
+    
+    btn.addEventListener('touchend', function(e) {
+      e.preventDefault();
+      window.joystickControl.pressedButtons[key] = false;
+    });
+    
+    btn.addEventListener('mousedown', function(e) {
+      e.preventDefault();
+      window.joystickControl.pressedButtons[key] = true;
+    });
+    
+    btn.addEventListener('mouseup', function(e) {
+      e.preventDefault();
+      window.joystickControl.pressedButtons[key] = false;
+    });
+  }
+  
+  setupButton(upBtn, 'up');
+  setupButton(downBtn, 'down');
+  setupButton(leftBtn, 'left');
+  setupButton(rightBtn, 'right');
+  setupButton(fireBtn, 'fire');
+})();
+
 // ===== ASTEROID GAME BACKGROUND ANIMATION =====
 (function() {
   const canvas = document.getElementById('asteroidCanvas');
@@ -1259,7 +1620,7 @@ async function fetchLatest() {
     }
   }
   
-  // Autonomous ship AI
+  // Autonomous ship AI or Manual Control
   function updateShipAI() {
     // Check if ship should respawn
     if (ship.exploded) {
@@ -1274,35 +1635,33 @@ async function fetchLatest() {
       return; // Don't update AI while exploded
     }
     
-    // Find nearest asteroid
-    let nearest = null;
-    let nearestDist = Infinity;
-    
-    asteroids.forEach(asteroid => {
-      const dx = asteroid.x - ship.x;
-      const dy = asteroid.y - ship.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist < nearestDist) {
-        nearestDist = dist;
-        nearest = asteroid;
+    // Check if manual control is active
+    if (window.joystickControl && window.joystickControl.isManualControl()) {
+      const buttons = window.joystickControl.pressedButtons;
+      
+      // Handle rotation
+      if (buttons.left) {
+        ship.angle -= 0.1;
       }
-    });
-    
-    if (nearest) {
-      // Aim at nearest asteroid
-      const dx = nearest.x - ship.x;
-      const dy = nearest.y - ship.y;
-      const targetAngle = Math.atan2(dy, dx);
+      if (buttons.right) {
+        ship.angle += 0.1;
+      }
       
-      // Smooth rotation toward target
-      let angleDiff = targetAngle - ship.angle;
-      while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-      while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+      // Handle thrust
+      ship.thrust = buttons.up;
+      if (buttons.up) {
+        ship.velocity.x += Math.cos(ship.angle) * 0.15;
+        ship.velocity.y += Math.sin(ship.angle) * 0.15;
+      }
       
-      ship.angle += angleDiff * 0.05;
+      // Handle reverse thrust
+      if (buttons.down) {
+        ship.velocity.x -= Math.cos(ship.angle) * 0.08;
+        ship.velocity.y -= Math.sin(ship.angle) * 0.08;
+      }
       
-      // Shoot periodically
-      if (Math.random() < 0.02 && Math.abs(angleDiff) < 0.3) {
+      // Handle fire
+      if (buttons.fire && !ship.lastFireState) {
         bullets.push({
           x: ship.x + Math.cos(ship.angle) * ship.size,
           y: ship.y + Math.sin(ship.angle) * ship.size,
@@ -1313,46 +1672,91 @@ async function fetchLatest() {
           life: 60
         });
       }
+      ship.lastFireState = buttons.fire;
+    } else {
+      // Original autonomous AI
+      ship.lastFireState = false;
       
-      // Thrust occasionally
-      ship.thrust = Math.random() < 0.3;
-      if (ship.thrust) {
-        ship.velocity.x += Math.cos(ship.angle) * 0.1;
-        ship.velocity.y += Math.sin(ship.angle) * 0.1;
-      }
+      // Find nearest asteroid
+      let nearest = null;
+      let nearestDist = Infinity;
       
-      // Use hyperspace in dangerous situations
-      const now = Date.now();
-      if (now - lastHyperspaceTime > HYPERSPACE_COOLDOWN) {
-        // Check if in danger (nearby large asteroid or UFO bullets)
-        let inDanger = false;
+      asteroids.forEach(asteroid => {
+        const dx = asteroid.x - ship.x;
+        const dy = asteroid.y - ship.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < nearestDist) {
+          nearestDist = dist;
+          nearest = asteroid;
+        }
+      });
+      
+      if (nearest) {
+        // Aim at nearest asteroid
+        const dx = nearest.x - ship.x;
+        const dy = nearest.y - ship.y;
+        const targetAngle = Math.atan2(dy, dx);
         
-        asteroids.forEach(asteroid => {
-          if (asteroid.size > 50) {
-            const dx = asteroid.x - ship.x;
-            const dy = asteroid.y - ship.y;
+        // Smooth rotation toward target
+        let angleDiff = targetAngle - ship.angle;
+        while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+        while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+        
+        ship.angle += angleDiff * 0.05;
+        
+        // Shoot periodically
+        if (Math.random() < 0.02 && Math.abs(angleDiff) < 0.3) {
+          bullets.push({
+            x: ship.x + Math.cos(ship.angle) * ship.size,
+            y: ship.y + Math.sin(ship.angle) * ship.size,
+            velocity: {
+              x: Math.cos(ship.angle) * 6,
+              y: Math.sin(ship.angle) * 6
+            },
+            life: 60
+          });
+        }
+        
+        // Thrust occasionally
+        ship.thrust = Math.random() < 0.3;
+        if (ship.thrust) {
+          ship.velocity.x += Math.cos(ship.angle) * 0.1;
+          ship.velocity.y += Math.sin(ship.angle) * 0.1;
+        }
+        
+        // Use hyperspace in dangerous situations
+        const now = Date.now();
+        if (now - lastHyperspaceTime > HYPERSPACE_COOLDOWN) {
+          // Check if in danger (nearby large asteroid or UFO bullets)
+          let inDanger = false;
+          
+          asteroids.forEach(asteroid => {
+            if (asteroid.size > 50) {
+              const dx = asteroid.x - ship.x;
+              const dy = asteroid.y - ship.y;
+              const dist = Math.sqrt(dx * dx + dy * dy);
+              if (dist < 100) inDanger = true;
+            }
+          });
+          
+          ufoBullets.forEach(bullet => {
+            const dx = bullet.x - ship.x;
+            const dy = bullet.y - ship.y;
             const dist = Math.sqrt(dx * dx + dy * dy);
-            if (dist < 100) inDanger = true;
+            if (dist < 80) inDanger = true;
+          });
+          
+          if (inDanger && Math.random() < 0.1) {
+            // Activate hyperspace!
+            createParticles(ship.x, ship.y, 15);
+            ship.x = Math.random() * canvas.width;
+            ship.y = Math.random() * canvas.height;
+            ship.velocity.x = 0;
+            ship.velocity.y = 0;
+            createParticles(ship.x, ship.y, 15);
+            lastHyperspaceTime = now;
+            console.log('Hyperspace jump!');
           }
-        });
-        
-        ufoBullets.forEach(bullet => {
-          const dx = bullet.x - ship.x;
-          const dy = bullet.y - ship.y;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist < 80) inDanger = true;
-        });
-        
-        if (inDanger && Math.random() < 0.1) {
-          // Activate hyperspace!
-          createParticles(ship.x, ship.y, 15);
-          ship.x = Math.random() * canvas.width;
-          ship.y = Math.random() * canvas.height;
-          ship.velocity.x = 0;
-          ship.velocity.y = 0;
-          createParticles(ship.x, ship.y, 15);
-          lastHyperspaceTime = now;
-          console.log('Hyperspace jump!');
         }
       }
     }
