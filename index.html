@@ -314,9 +314,9 @@
 
     .joystick-container {
       display: grid;
-      grid-template-columns: repeat(3, 30px);
-      grid-template-rows: repeat(3, 30px);
-      gap: 4px;
+      grid-template-columns: repeat(3, 15px);
+      grid-template-rows: repeat(3, 15px);
+      gap: 2px;
     }
 
     .direction-btn {
@@ -793,7 +793,7 @@ function drawContactVisualization(distanceKm) {
 
 // Animation function for contact visualization dots
 function animateContact() {
-  contactAnimationState.animationTime += 0.015; // Adjust speed (0.01 = slower, 0.05 = faster)
+  contactAnimationState.animationTime += 0.008; // Adjust speed (0.01 = slower, 0.05 = faster)
   if (contactAnimationState.animationTime >= 1) {
     contactAnimationState.animationTime = 0; // Loop back
   }
@@ -1198,7 +1198,7 @@ async function fetchLatest() {
   distanceDisplayTimer = setInterval(interpolateDistance, DISTANCE_DISPLAY_INTERVAL);
 })();
 
-// ===== DOUBLE-TAP JOYSTICK CONTROL SYSTEM =====
+// ===== DOUBLE-TAP/DOUBLE-CLICK JOYSTICK CONTROL SYSTEM =====
 (function() {
   let lastTapTime = 0;
   const DOUBLE_TAP_DELAY = 300; // milliseconds
@@ -1212,20 +1212,38 @@ async function fetchLatest() {
   let dragOffsetX = 0;
   let dragOffsetY = 0;
   
-  // Double-tap detection
+  // Helper function to toggle control panel
+  function toggleControlPanel() {
+    if (controlPanel.classList.contains('active')) {
+      controlPanel.classList.remove('active');
+      isManualControl = false;
+    } else {
+      controlPanel.classList.add('active');
+      isManualControl = true;
+    }
+  }
+  
+  // Double-click detection (mouse)
+  document.addEventListener('dblclick', function(e) {
+    // Avoid triggering on interactive elements
+    if (e.target.tagName === 'BUTTON' || 
+        e.target.closest('#controlPanel') ||
+        e.target.closest('input') ||
+        e.target.closest('select') ||
+        e.target.closest('textarea')) {
+      return;
+    }
+    toggleControlPanel();
+  });
+  
+  // Double-tap detection (touch)
   document.addEventListener('touchstart', function(e) {
     const now = Date.now();
     const timeSince = now - lastTapTime;
     
     if (timeSince < DOUBLE_TAP_DELAY && timeSince > 0) {
       // Double tap detected!
-      if (controlPanel.classList.contains('active')) {
-        controlPanel.classList.remove('active');
-        isManualControl = false;
-      } else {
-        controlPanel.classList.add('active');
-        isManualControl = true;
-      }
+      toggleControlPanel();
     }
     
     lastTapTime = now;
@@ -1345,6 +1363,194 @@ async function fetchLatest() {
   setupButton(fireBtn, 'fire');
 })();
 
+// ===== ARCADE SOUND EFFECTS SYSTEM =====
+class ArcadeSound {
+  constructor(audioContext) {
+    this.ctx = audioContext;
+  }
+  
+  playShoot() {
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    
+    osc.frequency.setValueAtTime(400, this.ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(200, this.ctx.currentTime + 0.1);
+    
+    gain.gain.setValueAtTime(0.3, this.ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.1);
+    
+    osc.start(this.ctx.currentTime);
+    osc.stop(this.ctx.currentTime + 0.1);
+  }
+  
+  playAsteroidHit(baseFreq = 150) {
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(baseFreq, this.ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(baseFreq / 2, this.ctx.currentTime + 0.15);
+    
+    gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.15);
+    
+    osc.start(this.ctx.currentTime);
+    osc.stop(this.ctx.currentTime + 0.15);
+  }
+  
+  playExplosion() {
+    // Create a noise burst for explosion
+    const bufferSize = this.ctx.sampleRate * 0.5; // 0.5 seconds
+    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = Math.random() * 2 - 1;
+    }
+    
+    const source = this.ctx.createBufferSource();
+    source.buffer = buffer;
+    
+    const gain = this.ctx.createGain();
+    const filter = this.ctx.createBiquadFilter();
+    
+    source.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.ctx.destination);
+    
+    filter.type = 'highpass';
+    filter.frequency.setValueAtTime(200, this.ctx.currentTime);
+    filter.frequency.exponentialRampToValueAtTime(50, this.ctx.currentTime + 0.5);
+    
+    gain.gain.setValueAtTime(0.4, this.ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.5);
+    
+    source.start(this.ctx.currentTime);
+    source.stop(this.ctx.currentTime + 0.5);
+  }
+  
+  playHyperspace() {
+    // Classic oscillating "whoosh" sound
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    
+    osc.type = 'triangle';
+    
+    // Pitch sweep: low to high to low
+    const duration = 0.4;
+    osc.frequency.setValueAtTime(100, this.ctx.currentTime);
+    osc.frequency.linearRampToValueAtTime(800, this.ctx.currentTime + duration / 2);
+    osc.frequency.linearRampToValueAtTime(100, this.ctx.currentTime + duration);
+    
+    gain.gain.setValueAtTime(0.25, this.ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + duration);
+    
+    osc.start(this.ctx.currentTime);
+    osc.stop(this.ctx.currentTime + duration);
+  }
+  
+  playUfoTheme() {
+    // Classic UFO "beep-boop" sound
+    const osc1 = this.ctx.createOscillator();
+    const osc2 = this.ctx.createOscillator();
+    const gain1 = this.ctx.createGain();
+    const gain2 = this.ctx.createGain();
+    const mainGain = this.ctx.createGain();
+    
+    osc1.connect(gain1);
+    osc2.connect(gain2);
+    gain1.connect(mainGain);
+    gain2.connect(mainGain);
+    mainGain.connect(this.ctx.destination);
+    
+    osc1.frequency.setValueAtTime(400, this.ctx.currentTime);
+    osc2.frequency.setValueAtTime(300, this.ctx.currentTime);
+    
+    gain1.gain.setValueAtTime(0.15, this.ctx.currentTime);
+    gain2.gain.setValueAtTime(0.15, this.ctx.currentTime);
+    
+    mainGain.gain.setValueAtTime(0.2, this.ctx.currentTime);
+    mainGain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.3);
+    
+    osc1.start(this.ctx.currentTime);
+    osc2.start(this.ctx.currentTime);
+    osc1.stop(this.ctx.currentTime + 0.3);
+    osc2.stop(this.ctx.currentTime + 0.3);
+  }
+  
+  playUfoBullet() {
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    
+    osc.frequency.setValueAtTime(600, this.ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(300, this.ctx.currentTime + 0.08);
+    
+    gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.08);
+    
+    osc.start(this.ctx.currentTime);
+    osc.stop(this.ctx.currentTime + 0.08);
+  }
+  
+  playThrust() {
+    // Subtle rumble for engine thrust
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(80, this.ctx.currentTime);
+    osc.frequency.linearRampToValueAtTime(120, this.ctx.currentTime + 0.1);
+    osc.frequency.linearRampToValueAtTime(80, this.ctx.currentTime + 0.2);
+    
+    gain.gain.setValueAtTime(0.03, this.ctx.currentTime);
+    gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.2);
+    
+    osc.start(this.ctx.currentTime);
+    osc.stop(this.ctx.currentTime + 0.2);
+  }
+}
+
+// Initialize audio context
+let audioContext = null;
+let arcadeSound = null;
+
+function initAudio() {
+  if (!audioContext) {
+    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    arcadeSound = new ArcadeSound(audioContext);
+  }
+}
+
+// Sound playback helpers
+function playSound(soundName) {
+  if (!arcadeSound) initAudio();
+  
+  // Resume audio context if suspended (required on some browsers)
+  if (audioContext.state === 'suspended') {
+    audioContext.resume();
+  }
+  
+  switch(soundName) {
+    case 'shoot': arcadeSound.playShoot(); break;
+    case 'hit': arcadeSound.playAsteroidHit(); break;
+    case 'explosion': arcadeSound.playExplosion(); break;
+    case 'hyperspace': arcadeSound.playHyperspace(); break;
+    case 'ufo': arcadeSound.playUfoTheme(); break;
+    case 'ufobullet': arcadeSound.playUfoBullet(); break;
+    case 'thrust': arcadeSound.playThrust(); break;
+  }
+}
+
 // ===== ASTEROID GAME BACKGROUND ANIMATION =====
 (function() {
   const canvas = document.getElementById('asteroidCanvas');
@@ -1462,6 +1668,7 @@ async function fetchLatest() {
       glowPhase: 0,
       lastShotTime: Date.now()
     });
+    playSound('ufo');
     console.log('UFO spawned!');
   }
   
@@ -1490,6 +1697,7 @@ async function fetchLatest() {
             },
             life: 120
           });
+          playSound('ufobullet');
           ufo.lastShotTime = now;
         }
       }
@@ -1520,6 +1728,7 @@ async function fetchLatest() {
           ship.respawnTime = Date.now() + 3000;
           createParticles(ship.x, ship.y, 30);
           ufoBullets.splice(index, 1);
+          playSound('explosion');
           console.log('Ship destroyed by UFO!');
           return;
         }
@@ -1671,6 +1880,7 @@ async function fetchLatest() {
           },
           life: 60
         });
+        playSound('shoot');
       }
       ship.lastFireState = buttons.fire;
     } else {
@@ -1715,6 +1925,7 @@ async function fetchLatest() {
             },
             life: 60
           });
+          playSound('shoot');
         }
         
         // Thrust occasionally
@@ -1722,6 +1933,7 @@ async function fetchLatest() {
         if (ship.thrust) {
           ship.velocity.x += Math.cos(ship.angle) * 0.1;
           ship.velocity.y += Math.sin(ship.angle) * 0.1;
+          // playSound('thrust'); // Muted
         }
         
         // Use hyperspace in dangerous situations
@@ -1755,6 +1967,7 @@ async function fetchLatest() {
             ship.velocity.y = 0;
             createParticles(ship.x, ship.y, 15);
             lastHyperspaceTime = now;
+            playSound('hyperspace');
             console.log('Hyperspace jump!');
           }
         }
@@ -1798,6 +2011,7 @@ async function fetchLatest() {
           ship.exploded = true;
           ship.respawnTime = Date.now() + 3000; // Respawn after 3 seconds
           createParticles(ship.x, ship.y, 30);
+          playSound('explosion');
           console.log('Ship destroyed by large asteroid!');
         }
       }
@@ -1812,6 +2026,7 @@ async function fetchLatest() {
           // Hit!
           createParticles(asteroid.x, asteroid.y, 10);
           bullets.splice(bIndex, 1);
+          playSound('hit');
           
           // Split asteroid if large enough
           if (asteroid.size > 15) {
@@ -1819,6 +2034,38 @@ async function fetchLatest() {
             asteroids.push(createAsteroid(asteroid.x, asteroid.y, asteroid.size / 2));
           }
           asteroids.splice(index, 1);
+        }
+      });
+      
+      // Check collision with other asteroids
+      asteroids.forEach((otherAsteroid, otherIndex) => {
+        if (index === otherIndex) return; // Skip self
+        
+        const dx = asteroid.x - otherAsteroid.x;
+        const dy = asteroid.y - otherAsteroid.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const minDist = asteroid.size + otherAsteroid.size;
+        
+        if (dist < minDist) {
+          // Collision detected
+          const largerSize = Math.max(asteroid.size, otherAsteroid.size);
+          const smallerSize = Math.min(asteroid.size, otherAsteroid.size);
+          
+          // If larger is 4x or more the size of smaller (smaller = 25% or less), dissintegrate the smaller
+          if (largerSize >= smallerSize * 4) {
+            createParticles(
+              asteroid.size < otherAsteroid.size ? asteroid.x : otherAsteroid.x,
+              asteroid.size < otherAsteroid.size ? asteroid.y : otherAsteroid.y,
+              15
+            );
+            
+            // Remove the smaller asteroid
+            if (asteroid.size < otherAsteroid.size) {
+              asteroids.splice(index, 1);
+            } else {
+              asteroids.splice(otherIndex, 1);
+            }
+          }
         }
       });
     });
