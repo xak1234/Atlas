@@ -185,6 +185,15 @@
       letter-spacing: 0.5px;
       min-height: 16px;
     }
+    .acceleration-details {
+      font-size: 9px;
+      font-weight: 400;
+      color: #9fb3d2;
+      text-transform: none;
+      letter-spacing: 0;
+      margin-top: 2px;
+      text-transform: lowercase;
+    }
 
     .starmap-section {
       display: grid;
@@ -535,6 +544,7 @@
             <div class="distance-value" id="distanceValue">—</div>
             <div class="distance-label" style="margin-top: 4px;">km</div>
             <div class="acceleration-status" id="accelerationStatus"></div>
+            <div class="acceleration-details" id="accelerationDetails"></div>
           </div>
         </div>
 
@@ -1082,11 +1092,13 @@ async function fetchDistance() {
 
 function updateAccelerationStatus() {
   const statusEl = document.getElementById('accelerationStatus');
-  if (!statusEl) return;
+  const detailsEl = document.getElementById('accelerationDetails');
+  if (!statusEl || !detailsEl) return;
   
   // Need at least 3 velocity measurements to detect reliable acceleration
   if (distanceState.velocityHistory.length < 3) {
     statusEl.textContent = '';
+    detailsEl.textContent = '';
     return;
   }
   
@@ -1099,6 +1111,7 @@ function updateAccelerationStatus() {
   
   if (recentVelocities.length < 3) {
     statusEl.textContent = '';
+    detailsEl.textContent = '';
     return;
   }
   
@@ -1126,6 +1139,7 @@ function updateAccelerationStatus() {
   const denominator = n * sumTimeSq - sumTime * sumTime;
   if (denominator === 0) {
     statusEl.textContent = '';
+    detailsEl.textContent = '';
     return;
   }
   
@@ -1143,25 +1157,46 @@ function updateAccelerationStatus() {
   
   const rSquared = ssTotal > 0 ? 1 - (ssResidual / ssTotal) : 0;
   
+  // Calculate time span and velocity change for display
+  const timeSpanSeconds = timeDeltas[timeDeltas.length - 1] - timeDeltas[0];
+  const velocityChange = acceleration * timeSpanSeconds; // Total velocity change over the period
+  
+  // Format time span nicely
+  let timeSpanText = '';
+  if (timeSpanSeconds < 60) {
+    timeSpanText = Math.round(timeSpanSeconds) + ' seconds';
+  } else if (timeSpanSeconds < 3600) {
+    timeSpanText = Math.round(timeSpanSeconds / 60) + ' minutes';
+  } else {
+    const hours = Math.round(timeSpanSeconds / 3600);
+    timeSpanText = hours + ' hour' + (hours > 1 ? 's' : '');
+  }
+  
   // Only show acceleration/deceleration if:
   // 1. Acceleration magnitude is significant (> 0.001 km/s²)
   // 2. Trend is confident (R² > 0.3, meaning at least 30% of variance is explained by trend)
   const accelerationThreshold = 0.001; // km/s² (very sensitive)
   const confidenceThreshold = 0.3; // R² threshold
   
-  console.log(`Acceleration: ${acceleration.toFixed(6)} km/s² | R²: ${rSquared.toFixed(3)} | Confidence: ${(rSquared * 100).toFixed(1)}%`);
+  console.log(`Acceleration: ${acceleration.toFixed(6)} km/s² | R²: ${rSquared.toFixed(3)} | Confidence: ${(rSquared * 100).toFixed(1)}% | Change: ${velocityChange.toFixed(2)} km/s over ${timeSpanText}`);
   
   // Check if we have strong confidence and significant acceleration
   if (rSquared > confidenceThreshold) {
     if (acceleration > accelerationThreshold) {
       statusEl.textContent = 'Accelerating';
+      const changePerMinute = velocityChange / (timeSpanSeconds / 60);
+      detailsEl.textContent = `+${velocityChange.toFixed(2)} km/s over ${timeSpanText} (+${changePerMinute.toFixed(3)} km/s per min)`;
     } else if (acceleration < -accelerationThreshold) {
       statusEl.textContent = 'Decelerating';
+      const changePerMinute = Math.abs(velocityChange) / (timeSpanSeconds / 60);
+      detailsEl.textContent = `−${Math.abs(velocityChange).toFixed(2)} km/s over ${timeSpanText} (−${changePerMinute.toFixed(3)} km/s per min)`;
     } else {
       statusEl.textContent = '';
+      detailsEl.textContent = '';
     }
   } else {
     statusEl.textContent = ''; // Not confident enough
+    detailsEl.textContent = '';
   }
 }
 
