@@ -1,4 +1,4 @@
-# 3I / ATLAS Brightness Tracker / Screen Saver / Asteroid Play
+# 3I / ATLAS Tracker / Screen Saver / Asteroid Play
 
 ![ATLAS](Atlas.png)
 
