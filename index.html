@@ -497,10 +497,104 @@
         height: 3px;
       }
     }
+
+    /* Screensaver Mode Styles */
+    body.screensaver-mode {
+      padding: 0;
+      margin: 0;
+      overflow: hidden;
+    }
+
+    body.screensaver-mode #asteroidCanvas {
+      z-index: 1000;
+      pointer-events: auto;
+    }
+
+    body.screensaver-mode .container {
+      display: none;
+    }
+
+    body.screensaver-mode #controlPanel {
+      display: none !important;
+    }
+
+    #screensaverToggle {
+      position: fixed;
+      top: 15px;
+      left: 15px;
+      width: 40px;
+      height: 40px;
+      background: rgba(126, 200, 255, 0.2);
+      border: 2px solid rgba(126, 200, 255, 0.5);
+      border-radius: 6px;
+      color: #7ec8ff;
+      font-size: 20px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s ease;
+      user-select: none;
+      z-index: 999;
+    }
+
+    #screensaverToggle:hover {
+      background: rgba(126, 200, 255, 0.4);
+      transform: scale(1.1);
+    }
+
+    #screensaverToggle:active {
+      transform: scale(0.95);
+    }
+
+    body.screensaver-mode #screensaverToggle {
+      top: 20px;
+      left: 20px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s ease;
+    }
+
+    body.screensaver-mode #screensaverToggle:hover {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    #screensaverHint {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(15, 27, 42, 0.8);
+      color: #9fb3d2;
+      padding: 12px 20px;
+      border-radius: 6px;
+      border: 1px solid rgba(126, 200, 255, 0.3);
+      font-size: 12px;
+      text-align: center;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s ease;
+      z-index: 999;
+    }
+
+    body.screensaver-mode #screensaverHint {
+      opacity: 1;
+      animation: fadeInOut 4s ease-in-out infinite;
+    }
+
+    @keyframes fadeInOut {
+      0%, 100% { opacity: 0; }
+      50% { opacity: 1; }
+    }
   </style>
 </head>
 <body>
   <canvas id="asteroidCanvas"></canvas>
+  
+  <!-- Screensaver Controls -->
+  <button id="screensaverToggle" title="Enter Screensaver Mode">⚙️</button>
+  <div id="screensaverHint">Press ESC or move mouse to exit • Double-click to toggle</div>
   
   <!-- Joystick Control Panel -->
   <div id="controlPanel">
@@ -1457,6 +1551,105 @@ async function fetchLatest() {
   setupButton(fireBtn, 'fire');
 })();
 
+// ===== SCREENSAVER MODE SYSTEM =====
+(function() {
+  const screensaverToggle = document.getElementById('screensaverToggle');
+  const screensaverHint = document.getElementById('screensaverHint');
+  let isScreensaverMode = false;
+  let idleTimer = null;
+  let lastActivityTime = Date.now();
+  const IDLE_TIMEOUT = 300000; // 5 minutes of inactivity
+  
+  function enterScreensaverMode() {
+    isScreensaverMode = true;
+    document.body.classList.add('screensaver-mode');
+    screensaverToggle.textContent = '✕';
+    screensaverToggle.title = 'Exit Screensaver Mode';
+    console.log('Entered screensaver mode');
+  }
+  
+  function exitScreensaverMode() {
+    isScreensaverMode = false;
+    document.body.classList.remove('screensaver-mode');
+    screensaverToggle.textContent = '⚙️';
+    screensaverToggle.title = 'Enter Screensaver Mode';
+    lastActivityTime = Date.now();
+    console.log('Exited screensaver mode');
+  }
+  
+  // Toggle screensaver on button click
+  screensaverToggle.addEventListener('click', function(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (isScreensaverMode) {
+      exitScreensaverMode();
+    } else {
+      enterScreensaverMode();
+    }
+  });
+  
+  // Exit screensaver on ESC key
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && isScreensaverMode) {
+      exitScreensaverMode();
+    }
+  });
+  
+  // Exit screensaver on mouse movement
+  document.addEventListener('mousemove', function(e) {
+    if (isScreensaverMode) {
+      // Only exit if mouse moved significantly (not just hovering over button)
+      const hint = screensaverHint.getBoundingClientRect();
+      const toggle = screensaverToggle.getBoundingClientRect();
+      const isOverUI = (e.clientX >= hint.left && e.clientX <= hint.right && 
+                        e.clientY >= hint.top && e.clientY <= hint.bottom) ||
+                       (e.clientX >= toggle.left && e.clientX <= toggle.right && 
+                        e.clientY >= toggle.top && e.clientY <= toggle.bottom);
+      if (!isOverUI) {
+        exitScreensaverMode();
+      }
+    }
+    lastActivityTime = Date.now();
+  });
+  
+  // Exit screensaver on click (except on UI elements)
+  document.addEventListener('click', function(e) {
+    if (isScreensaverMode && e.target.id !== 'screensaverToggle') {
+      exitScreensaverMode();
+    }
+  });
+  
+  // Exit screensaver on touch
+  document.addEventListener('touchstart', function(e) {
+    if (isScreensaverMode) {
+      exitScreensaverMode();
+    }
+  });
+  
+  // Auto-activate screensaver after idle timeout
+  function resetIdleTimer() {
+    if (idleTimer) clearTimeout(idleTimer);
+    if (!isScreensaverMode) {
+      idleTimer = setTimeout(() => {
+        enterScreensaverMode();
+      }, IDLE_TIMEOUT);
+    }
+  }
+  
+  // Track activity for idle detection
+  ['mousedown', 'keydown', 'scroll', 'touchstart'].forEach(event => {
+    document.addEventListener(event, resetIdleTimer, true);
+  });
+  
+  // Initialize idle timer
+  resetIdleTimer();
+  
+  // Export screensaver state for game to use
+  window.screensaverMode = {
+    isActive: () => isScreensaverMode
+  };
+})();
+
 // ===== ARCADE SOUND EFFECTS SYSTEM =====
 class ArcadeSound {
   constructor(audioContext) {
@@ -1796,6 +1989,22 @@ function playSound(soundName) {
         }
       }
       
+      // Check collision with asteroids
+      asteroids.forEach((asteroid, asteroidIndex) => {
+        const dx = ufo.x - asteroid.x;
+        const dy = ufo.y - asteroid.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        
+        if (dist < ufo.size + asteroid.size) {
+          // UFO hit by asteroid!
+          createParticles(ufo.x, ufo.y, 20);
+          ufos.splice(index, 1);
+          playSound('explosion');
+          console.log('UFO destroyed by asteroid!');
+          return;
+        }
+      });
+      
       // Remove if off screen
       if (ufo.x < -100 || ufo.x > canvas.width + 100) {
         ufos.splice(index, 1);
@@ -1827,6 +2036,28 @@ function playSound(soundName) {
           return;
         }
       }
+      
+      // Check collision with asteroids
+      asteroids.forEach((asteroid, asteroidIndex) => {
+        const dx = bullet.x - asteroid.x;
+        const dy = bullet.y - asteroid.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        
+        if (dist < asteroid.size) {
+          // UFO bullet hit asteroid!
+          createParticles(asteroid.x, asteroid.y, 8);
+          ufoBullets.splice(index, 1);
+          playSound('hit');
+          
+          // Split asteroid if large enough
+          if (asteroid.size > 15) {
+            asteroids.push(createAsteroid(asteroid.x, asteroid.y, asteroid.size / 2));
+            asteroids.push(createAsteroid(asteroid.x, asteroid.y, asteroid.size / 2));
+          }
+          asteroids.splice(asteroidIndex, 1);
+          return;
+        }
+      });
       
       if (bullet.life <= 0 || bullet.x < 0 || bullet.x > canvas.width || 
           bullet.y < 0 || bullet.y > canvas.height) {
@@ -1969,10 +2200,10 @@ function playSound(soundName) {
           x: ship.x + Math.cos(ship.angle) * ship.size,
           y: ship.y + Math.sin(ship.angle) * ship.size,
           velocity: {
-            x: Math.cos(ship.angle) * 6,
-            y: Math.sin(ship.angle) * 6
+            x: Math.cos(ship.angle) * 12,
+            y: Math.sin(ship.angle) * 12
           },
-          life: 60
+          life: 120
         });
         playSound('shoot');
       }
@@ -2014,10 +2245,10 @@ function playSound(soundName) {
             x: ship.x + Math.cos(ship.angle) * ship.size,
             y: ship.y + Math.sin(ship.angle) * ship.size,
             velocity: {
-              x: Math.cos(ship.angle) * 6,
-              y: Math.sin(ship.angle) * 6
+              x: Math.cos(ship.angle) * 12,
+              y: Math.sin(ship.angle) * 12
             },
-            life: 60
+            life: 120
           });
           playSound('shoot');
         }
@@ -2034,14 +2265,22 @@ function playSound(soundName) {
         const now = Date.now();
         if (now - lastHyperspaceTime > HYPERSPACE_COOLDOWN) {
           // Check if in danger (nearby large asteroid or UFO bullets)
-          let inDanger = false;
+          let dangerLevel = 0; // 0 = safe, 1 = moderate danger, 2+ = critical danger
+          let threatCount = 0;
           
           asteroids.forEach(asteroid => {
             if (asteroid.size > 50) {
               const dx = asteroid.x - ship.x;
               const dy = asteroid.y - ship.y;
               const dist = Math.sqrt(dx * dx + dy * dy);
-              if (dist < 100) inDanger = true;
+              if (dist < 150) {
+                dangerLevel += 1;
+                threatCount++;
+              }
+              if (dist < 80) {
+                dangerLevel += 2; // Critical danger
+                threatCount++;
+              }
             }
           });
           
@@ -2049,10 +2288,34 @@ function playSound(soundName) {
             const dx = bullet.x - ship.x;
             const dy = bullet.y - ship.y;
             const dist = Math.sqrt(dx * dx + dy * dy);
-            if (dist < 80) inDanger = true;
+            if (dist < 120) {
+              dangerLevel += 1;
+              threatCount++;
+            }
+            if (dist < 60) {
+              dangerLevel += 2; // Critical danger
+              threatCount++;
+            }
           });
           
-          if (inDanger && Math.random() < 0.1) {
+          // Hyperspace activation chance increases with danger level
+          // Safe: 0% chance, Moderate: 5-15% chance, Critical: 20-40% chance
+          let activationChance = 0;
+          if (dangerLevel >= 4) {
+            // Critical danger - high chance to jump
+            activationChance = 0.3 + (threatCount * 0.05); // 30-50% depending on threat count
+          } else if (dangerLevel >= 2) {
+            // Moderate danger - medium chance
+            activationChance = 0.1 + (threatCount * 0.03); // 10-25%
+          } else if (dangerLevel >= 1) {
+            // Low danger - low chance
+            activationChance = 0.05; // 5%
+          }
+          
+          // Cap activation chance at 60% (hyperspace is not guaranteed)
+          activationChance = Math.min(activationChance, 0.6);
+          
+          if (dangerLevel > 0 && Math.random() < activationChance) {
             // Activate hyperspace!
             createParticles(ship.x, ship.y, 15);
             ship.x = Math.random() * canvas.width;
@@ -2062,7 +2325,7 @@ function playSound(soundName) {
             createParticles(ship.x, ship.y, 15);
             lastHyperspaceTime = now;
             playSound('hyperspace');
-            console.log('Hyperspace jump!');
+            console.log(`Hyperspace jump! (Danger: ${dangerLevel}, Threats: ${threatCount})`);
           }
         }
       }
@@ -2141,25 +2404,31 @@ function playSound(soundName) {
         const minDist = asteroid.size + otherAsteroid.size;
         
         if (dist < minDist) {
-          // Collision detected
-          const largerSize = Math.max(asteroid.size, otherAsteroid.size);
-          const smallerSize = Math.min(asteroid.size, otherAsteroid.size);
-          
-          // If larger is 4x or more the size of smaller (smaller = 25% or less), dissintegrate the smaller
-          if (largerSize >= smallerSize * 4) {
-            createParticles(
-              asteroid.size < otherAsteroid.size ? asteroid.x : otherAsteroid.x,
-              asteroid.size < otherAsteroid.size ? asteroid.y : otherAsteroid.y,
-              15
-            );
+          // Collision detected - smaller asteroid breaks in half
+          if (asteroid.size < otherAsteroid.size) {
+            // Current asteroid is smaller - break it in half
+            createParticles(asteroid.x, asteroid.y, 10);
             
-            // Remove the smaller asteroid
-            if (asteroid.size < otherAsteroid.size) {
-              asteroids.splice(index, 1);
-            } else {
-              asteroids.splice(otherIndex, 1);
+            // Split the smaller asteroid
+            if (asteroid.size > 15) {
+              asteroids.push(createAsteroid(asteroid.x, asteroid.y, asteroid.size / 2));
+              asteroids.push(createAsteroid(asteroid.x, asteroid.y, asteroid.size / 2));
             }
+            asteroids.splice(index, 1);
+            playSound('hit');
+          } else if (asteroid.size > otherAsteroid.size) {
+            // Other asteroid is smaller - break it in half
+            createParticles(otherAsteroid.x, otherAsteroid.y, 10);
+            
+            // Split the smaller asteroid
+            if (otherAsteroid.size > 15) {
+              asteroids.push(createAsteroid(otherAsteroid.x, otherAsteroid.y, otherAsteroid.size / 2));
+              asteroids.push(createAsteroid(otherAsteroid.x, otherAsteroid.y, otherAsteroid.size / 2));
+            }
+            asteroids.splice(otherIndex, 1);
+            playSound('hit');
           }
+          // If same size, no collision (they pass through)
         }
       });
     });
@@ -2351,7 +2620,45 @@ function playSound(soundName) {
     drawBullets();
     drawParticles();
     
+    // Draw screensaver info overlay when in screensaver mode
+    if (window.screensaverMode && window.screensaverMode.isActive()) {
+      drawScreensaverOverlay();
+    }
+    
     requestAnimationFrame(gameLoop);
+  }
+  
+  // Draw screensaver overlay with game stats
+  function drawScreensaverOverlay() {
+    ctx.save();
+    
+    // Draw semi-transparent header bar
+    ctx.fillStyle = 'rgba(8, 16, 26, 0.6)';
+    ctx.fillRect(0, 0, canvas.width, 60);
+    
+    // Draw title
+    ctx.fillStyle = '#7ef0a3';
+    ctx.font = 'bold 24px system-ui';
+    ctx.textAlign = 'left';
+    ctx.fillText('ATLAS SCREENSAVER', 20, 35);
+    
+    // Draw stats on the right
+    ctx.fillStyle = '#9fb3d2';
+    ctx.font = '12px system-ui';
+    ctx.textAlign = 'right';
+    const statsText = `Asteroids: ${asteroids.length} | UFOs: ${ufos.length} | Bullets: ${bullets.length}`;
+    ctx.fillText(statsText, canvas.width - 20, 35);
+    
+    // Draw bottom info bar
+    ctx.fillStyle = 'rgba(8, 16, 26, 0.6)';
+    ctx.fillRect(0, canvas.height - 40, canvas.width, 40);
+    
+    ctx.fillStyle = '#9fb3d2';
+    ctx.font = '11px system-ui';
+    ctx.textAlign = 'center';
+    ctx.fillText('Press ESC or move mouse to exit • Click settings button to toggle', canvas.width / 2, canvas.height - 15);
+    
+    ctx.restore();
   }
   
   // Start the game

@@ -5,12 +5,7 @@
 Tongue In Cheek
 
 ## Overview
-Real-time tracking and visualization system for monitoring Anomoly C/2025 N1 (ATLAS), with live magnitude data, distance calculations, and predicted closest approach dates. The application features an interactive asteroid game visualization running in the background.
-
-## 🌟 Project Purpose
-
-This tracker was developed in response to emerging scientific data about comet C/2025 N1 (ATLAS). The system:
-Real-time tracking and visualization system for monitoring Anomoly C/2025 N1 (ATLAS), with live magnitude data, distance calculations, and predicted closest approach dates. The application features an interactive asteroid game visualization running in the background.
+Real-time tracking and visualization system for monitoring Anomoly C/2025 N1 (ATLAS), with live magnitude data, distance calculations, and predicted closest approach dates. The application features an interactive asteroid game visualization running in the background, with a **fully functional screensaver mode**.
 
 ## 🌟 Project Purpose
 
@@ -46,6 +41,18 @@ Comet C/2025 N1 exhibits characteristics that warrant continuous observation:
 - **Acceleration/deceleration detection** based on velocity changes
 - **Historical observations table** showing latest data first
 
+### Screensaver Mode ⭐ NEW
+- **Fullscreen asteroid game** with enhanced visuals
+- **Auto-activation** after 5 minutes of inactivity
+- **Multiple exit methods**:
+  - Press **ESC** key
+  - Move mouse (outside UI elements)
+  - Click anywhere on screen
+  - Click the settings button (⚙️ → ✕)
+- **Game stats overlay** showing active asteroids, UFOs, and bullets
+- **Smooth transitions** between normal and screensaver modes
+- **Idle detection** with automatic activation
+
 ### Visual Features
 - **Background asteroid game** with autonomous AI-controlled spaceship
 - **Interactive canvas overlay** (transparent, non-intrusive)
@@ -53,6 +60,7 @@ Comet C/2025 N1 exhibits characteristics that warrant continuous observation:
 - **UFO encounters** with targeting systems and combat
 - **Hyperspace mechanics** for emergency evasion
 - **Collision detection** and particle effects
+- **Screensaver overlay** with game information and exit instructions
 
 ### Security & Performance
 - **Rate limiting** (60 requests/minute per IP)
@@ -69,6 +77,7 @@ Comet C/2025 N1 exhibits characteristics that warrant continuous observation:
 - Real-time data visualization
 - Autonomous game AI
 - Responsive CSS Grid layout
+- Screensaver mode management
 
 ### Backend
 - Node.js with Express
@@ -160,6 +169,52 @@ The background asteroid game features:
 - **3-second respawn** after ship destruction
 - **Particle effects** for explosions and hyperspace
 
+## 🖥️ Screensaver Mode Guide
+
+### Activating Screensaver
+
+**Method 1: Manual Toggle**
+- Click the **⚙️ settings button** in the top-left corner
+- The button changes to **✕** when screensaver is active
+
+**Method 2: Automatic Idle Detection**
+- Screensaver activates automatically after **5 minutes** of inactivity
+- Inactivity includes: no mouse movement, no keyboard input, no scrolling, no touch
+
+### Exiting Screensaver
+
+**Method 1: Press ESC**
+- Simply press the Escape key to exit immediately
+
+**Method 2: Move Mouse**
+- Move your mouse anywhere on the screen (except over UI elements)
+- Screensaver exits automatically
+
+**Method 3: Click Screen**
+- Click anywhere on the screen to exit
+- (Except clicking the settings button, which toggles the mode)
+
+**Method 4: Touch Screen**
+- On touch devices, any touch input exits screensaver mode
+
+### Screensaver Display
+
+When active, the screensaver shows:
+- **Title bar** with "ATLAS SCREENSAVER" and live game statistics
+- **Game stats**: Number of active asteroids, UFOs, and bullets
+- **Bottom info bar** with exit instructions
+- **Full-screen asteroid game** with enhanced visuals
+- **Smooth animations** and particle effects
+
+### Customizing Idle Timeout
+
+To change the idle timeout (default: 5 minutes), edit the screensaver code:
+
+```javascript
+const IDLE_TIMEOUT = 300000; // milliseconds (300000 = 5 minutes)
+// Change to: 600000 for 10 minutes, 120000 for 2 minutes, etc.
+```
+
 ## 🛡️ Security Features
 
 - Rate limiting (60 req/min per IP)
@@ -177,6 +232,7 @@ The background asteroid game features:
 - **Display interpolation**: Every 1 second for smooth distance countdown
 - **Rate limit cleanup**: Every 60 seconds
 - **Canvas rendering**: 60 FPS via requestAnimationFrame
+- **Screensaver overlay**: Minimal performance impact
 
 ## 🌐 Deployment
 
@@ -199,6 +255,7 @@ Contributions welcome for:
 - Enhanced visualization features
 - Performance optimizations
 - Scientific analysis tools
+- Screensaver enhancements
 
 ## 📞 Contact
 
