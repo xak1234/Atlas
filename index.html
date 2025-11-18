@@ -975,23 +975,31 @@ async function fetchDistance() {
       );
       
       // Calculate velocity using trajectory points for better accuracy
-      // Prefer using points with at least 5 minutes of time difference for stability
-      const MIN_TIME_FOR_VELOCITY_SECONDS = 300; // 5 minutes minimum
+      // Use a sliding window approach with multiple time points for noise reduction
+      const MIN_TIME_FOR_VELOCITY_SECONDS = 180; // 3 minutes minimum (lowered for more frequent updates)
+      const OPTIMAL_TIME_WINDOW = 600; // 10 minutes optimal window
       
       if (distanceState.trajectoryPoints.length >= 2) {
         const points = distanceState.trajectoryPoints;
         const newestPoint = points[points.length - 1];
         
-        // Find the oldest point that's at least MIN_TIME_FOR_VELOCITY_SECONDS ago
+        // Find the best point pair for velocity calculation
+        // Prefer points that are close to OPTIMAL_TIME_WINDOW apart for accuracy
         let bestOldPoint = null;
         let bestTimeDiff = 0;
+        let bestDiffFromOptimal = Infinity;
         
         for (let i = points.length - 2; i >= 0; i--) {
           const timeDiffSeconds = (newestPoint.time - points[i].time) / 1000;
-          if (timeDiffSeconds >= MIN_TIME_FOR_VELOCITY_SECONDS) {
-            bestOldPoint = points[i];
-            bestTimeDiff = timeDiffSeconds;
-            break;
+          
+          // Accept points within [MIN_TIME_FOR_VELOCITY, 2*OPTIMAL_TIME_WINDOW]
+          if (timeDiffSeconds >= MIN_TIME_FOR_VELOCITY_SECONDS && timeDiffSeconds <= 2 * OPTIMAL_TIME_WINDOW) {
+            const diffFromOptimal = Math.abs(timeDiffSeconds - OPTIMAL_TIME_WINDOW);
+            if (diffFromOptimal < bestDiffFromOptimal) {
+              bestOldPoint = points[i];
+              bestTimeDiff = timeDiffSeconds;
+              bestDiffFromOptimal = diffFromOptimal;
+            }
           }
         }
         
@@ -1003,25 +1011,28 @@ async function fetchDistance() {
             // Calculate velocity (km/s) - use absolute value to ensure positive
             const calculatedVelocity = Math.abs(distanceDiffKm) / bestTimeDiff;
             
-            // Only update if we have a reasonable velocity (between 1 and 200 km/s for comets)
-            // This filters out noise from small measurement errors
-            if (calculatedVelocity >= 1 && calculatedVelocity <= 200) {
+            // More lenient range: comets can be 0.5-250 km/s depending on orbital characteristics
+            // Measurement noise affects small values, so noise filter is adaptive
+            const minVelocity = Math.max(0.1, 5 / bestTimeDiff); // Noise floor depends on measurement precision over time window
+            const maxVelocity = 250;
+            
+            if (calculatedVelocity >= minVelocity && calculatedVelocity <= maxVelocity) {
               // Track velocity history for acceleration detection
               distanceState.velocityHistory.push({ time: now, velocity: calculatedVelocity });
               
-              // Keep only last 10 minutes of velocity history
-              const tenMinutesMs = 10 * 60 * 1000;
+              // Keep only last 30 minutes of velocity history for better trend detection
+              const thirtyMinutesMs = 30 * 60 * 1000;
               distanceState.velocityHistory = distanceState.velocityHistory.filter(
-                entry => now - entry.time < tenMinutesMs
+                entry => now - entry.time < thirtyMinutesMs
               );
               
               distanceState.velocityKmPerSecond = calculatedVelocity;
-              console.log(`Distance updated: ${newDistance.toLocaleString()} km | Velocity: ${distanceState.velocityKmPerSecond.toFixed(2)} km/s | Time window: ${(bestTimeDiff / 60).toFixed(1)} min`);
+              console.log(`Distance updated: ${newDistance.toLocaleString()} km | Velocity: ${distanceState.velocityKmPerSecond.toFixed(2)} km/s | Time window: ${(bestTimeDiff / 60).toFixed(1)} min (accuracy: optimal)`);
               
               // Update acceleration status
               updateAccelerationStatus();
             } else {
-              console.log(`Velocity calculation out of range: ${calculatedVelocity.toFixed(2)} km/s (filtered)`);
+              console.log(`Velocity calculation filtered: ${calculatedVelocity.toFixed(2)} km/s (valid range: ${minVelocity.toFixed(2)}-${maxVelocity} km/s)`);
             }
           }
         } else if (distanceState.lastRealDistance !== null && distanceState.lastRealDistanceTime !== null) {
@@ -1029,20 +1040,23 @@ async function fetchDistance() {
           const timeDiffSeconds = (now - distanceState.lastRealDistanceTime) / 1000;
           const distanceDiffKm = distanceState.lastRealDistance - newDistance;
           
-          if (timeDiffSeconds >= 60 && Math.abs(distanceDiffKm) > 0) { // At least 1 minute
+          if (timeDiffSeconds >= MIN_TIME_FOR_VELOCITY_SECONDS && Math.abs(distanceDiffKm) > 0) {
             const calculatedVelocity = Math.abs(distanceDiffKm) / timeDiffSeconds;
-            if (calculatedVelocity >= 1 && calculatedVelocity <= 200) {
+            const minVelocity = Math.max(0.1, 5 / timeDiffSeconds);
+            const maxVelocity = 250;
+            
+            if (calculatedVelocity >= minVelocity && calculatedVelocity <= maxVelocity) {
               // Track velocity history for acceleration detection
               distanceState.velocityHistory.push({ time: now, velocity: calculatedVelocity });
               
-              // Keep only last 10 minutes of velocity history
-              const tenMinutesMs = 10 * 60 * 1000;
+              // Keep only last 30 minutes of velocity history
+              const thirtyMinutesMs = 30 * 60 * 1000;
               distanceState.velocityHistory = distanceState.velocityHistory.filter(
-                entry => now - entry.time < tenMinutesMs
+                entry => now - entry.time < thirtyMinutesMs
               );
               
               distanceState.velocityKmPerSecond = calculatedVelocity;
-              console.log(`Distance updated: ${newDistance.toLocaleString()} km | Velocity: ${distanceState.velocityKmPerSecond.toFixed(2)} km/s | Time window: ${(timeDiffSeconds / 60).toFixed(1)} min (fallback)`);
+              console.log(`Distance updated: ${newDistance.toLocaleString()} km | Velocity: ${distanceState.velocityKmPerSecond.toFixed(2)} km/s | Time window: ${(timeDiffSeconds / 60).toFixed(1)} min (accuracy: fallback)`);
               
               // Update acceleration status
               updateAccelerationStatus();
@@ -1050,7 +1064,7 @@ async function fetchDistance() {
           }
         }
       } else {
-        console.log(`Initial distance: ${newDistance.toLocaleString()} km (need more points for velocity)`);
+        console.log(`Initial distance: ${newDistance.toLocaleString()} km (need more points for velocity calculation)`);
       }
       
       // Update the state with new real distance
@@ -1070,39 +1084,84 @@ function updateAccelerationStatus() {
   const statusEl = document.getElementById('accelerationStatus');
   if (!statusEl) return;
   
-  // Need at least 2 velocity measurements to detect acceleration/deceleration
-  if (distanceState.velocityHistory.length < 2) {
+  // Need at least 3 velocity measurements to detect reliable acceleration
+  if (distanceState.velocityHistory.length < 3) {
     statusEl.textContent = '';
     return;
   }
   
   const history = distanceState.velocityHistory;
-  const recentCount = Math.min(5, history.length); // Use last 5 measurements
+  
+  // Calculate linear regression acceleration over the entire recent history (more robust)
+  // This gives us a true acceleration rate (km/s²) rather than just comparing averages
+  const recentCount = Math.min(10, history.length); // Use up to last 10 measurements for better fit
   const recentVelocities = history.slice(-recentCount);
   
-  // Calculate average velocity for older half vs newer half
-  const midPoint = Math.floor(recentVelocities.length / 2);
-  const olderVelocities = recentVelocities.slice(0, midPoint);
-  const newerVelocities = recentVelocities.slice(midPoint);
-  
-  if (olderVelocities.length === 0 || newerVelocities.length === 0) {
+  if (recentVelocities.length < 3) {
     statusEl.textContent = '';
     return;
   }
   
-  const avgOlder = olderVelocities.reduce((sum, v) => sum + v.velocity, 0) / olderVelocities.length;
-  const avgNewer = newerVelocities.reduce((sum, v) => sum + v.velocity, 0) / newerVelocities.length;
+  // Calculate time deltas in seconds
+  const timeDeltas = [];
+  const velocities = [];
   
-  // Threshold: velocity change must be at least 0.5 km/s to be significant
-  const velocityDiff = avgNewer - avgOlder;
-  const threshold = 0.5;
+  for (let i = 0; i < recentVelocities.length; i++) {
+    timeDeltas.push(recentVelocities[i].time / 1000); // Convert to seconds
+    velocities.push(recentVelocities[i].velocity);
+  }
   
-  if (velocityDiff > threshold) {
-    statusEl.textContent = 'Accelerating';
-  } else if (velocityDiff < -threshold) {
-    statusEl.textContent = 'Decelerating';
-  } else {
+  // Linear regression: find best fit line for velocity vs time
+  const n = velocities.length;
+  let sumTime = 0, sumVel = 0, sumTimeVel = 0, sumTimeSq = 0;
+  
+  for (let i = 0; i < n; i++) {
+    sumTime += timeDeltas[i];
+    sumVel += velocities[i];
+    sumTimeVel += timeDeltas[i] * velocities[i];
+    sumTimeSq += timeDeltas[i] * timeDeltas[i];
+  }
+  
+  // Slope = acceleration (km/s²), Intercept = initial velocity
+  const denominator = n * sumTimeSq - sumTime * sumTime;
+  if (denominator === 0) {
     statusEl.textContent = '';
+    return;
+  }
+  
+  const acceleration = (n * sumTimeVel - sumTime * sumVel) / denominator;
+  
+  // Calculate R² (correlation coefficient squared) to measure confidence
+  const meanVel = sumVel / n;
+  let ssTotal = 0, ssResidual = 0;
+  
+  for (let i = 0; i < n; i++) {
+    const predicted = acceleration * timeDeltas[i] + ((sumVel - acceleration * sumTime) / n);
+    ssTotal += Math.pow(velocities[i] - meanVel, 2);
+    ssResidual += Math.pow(velocities[i] - predicted, 2);
+  }
+  
+  const rSquared = ssTotal > 0 ? 1 - (ssResidual / ssTotal) : 0;
+  
+  // Only show acceleration/deceleration if:
+  // 1. Acceleration magnitude is significant (> 0.001 km/s²)
+  // 2. Trend is confident (R² > 0.3, meaning at least 30% of variance is explained by trend)
+  const accelerationThreshold = 0.001; // km/s² (very sensitive)
+  const confidenceThreshold = 0.3; // R² threshold
+  
+  console.log(`Acceleration: ${acceleration.toFixed(6)} km/s² | R²: ${rSquared.toFixed(3)} | Confidence: ${(rSquared * 100).toFixed(1)}%`);
+  
+  // Check if we have strong confidence and significant acceleration
+  if (rSquared > confidenceThreshold) {
+    if (acceleration > accelerationThreshold) {
+      statusEl.textContent = 'Accelerating';
+    } else if (acceleration < -accelerationThreshold) {
+      statusEl.textContent = 'Decelerating';
+    } else {
+      statusEl.textContent = '';
+    }
+  } else {
+    statusEl.textContent = ''; // Not confident enough
   }
 }
 
