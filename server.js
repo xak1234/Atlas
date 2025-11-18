@@ -73,12 +73,9 @@ let cache = {
   raw: {}
 };
 
-const REFRESH_INTERVAL_HOURS = Number(process.env.REFRESH_INTERVAL_HOURS || 1); // default every 1 hour
+const REFRESH_INTERVAL_HOURS = Number(process.env.REFRESH_INTERVAL_HOURS || 6); // default every 6 hours
 const REFRESH_INTERVAL_MS = Math.max(60, REFRESH_INTERVAL_HOURS * 3600) * 1000; // ensure at least 60s
 const DISTANCE_REFRESH_SECONDS = 10; // refresh distance every 10 seconds
-
-// Luminosity (magnitude) refresh: every 1 hour
-// To change frequency, modify the interval below or set REFRESH_INTERVAL_HOURS environment variable
 
 // Helper to fetch and parse TheSkyLive for /c2025n1-info
 async function fetchTheSkyLive(){
@@ -88,48 +85,13 @@ async function fetchTheSkyLive(){
     const text = await res.text();
     const $ = cheerio.load(text);
     const pageText = $('body').text();
-    
-    // Enhanced magnitude matching - try multiple patterns to catch "10.1"
-    // Pattern 1: "observed magnitude 10.1" or similar
-    let obs = pageText.match(/observed\s+mag(?:nitude)?\s*[:\-]?\s*(\d{1,2}\.\d{1,2})/i);
-    // Pattern 2: "Magnitude: 10.1" or "Current Magnitude 10.1"
-    if (!obs) obs = pageText.match(/(?:current\s+)?magnitude\s*[:\-]?\s*(\d{1,2}\.\d{1,2})/i);
-    // Pattern 3: "10.1" that appears near brightness/visual
-    if (!obs) obs = pageText.match(/visual\s*[:\-]?\s*(\d{1,2}\.\d{1,2})/i);
-    // Pattern 4: Look for any number pattern that matches typical magnitude range (0-18)
-    if (!obs) {
-      const allNumbers = pageText.match(/(\d{1,2}\.\d{1,2})/g);
-      // Filter for valid magnitude values (0-18)
-      if (allNumbers) {
-        const validMags = allNumbers.filter(n => {
-          const num = parseFloat(n);
-          return num >= 0 && num <= 18;
-        });
-        if (validMags.length > 0) {
-          // Take the first valid magnitude found
-          obs = [validMags[0], validMags[0]];
-        }
-      }
-    }
-    
-    // Predicted magnitude
-    let pred = pageText.match(/predicted\s+mag(?:nitude)?\s*[:\-]?\s*(\d{1,2}\.\d{1,2})/i);
-    
+    const obs = pageText.match(/observed\s+mag(?:nitude)?\D*([0-9]{1,2}\.\d{1,2})/i) || pageText.match(/observed\s*[:\-]\s*([0-9]{1,2}\.\d{1,2})/i);
+    const pred = pageText.match(/predicted\s+mag(?:nitude)?\D*([0-9]{1,2}\.\d{1,2})/i) || pageText.match(/predicted\s*[:\-]\s*([0-9]{1,2}\.\d{1,2})/i);
     // Extract distance to Earth (in km) - look for patterns like "310,769,103.3 kilometers" or "123,456 km"
     const dist = pageText.match(/distance(?:\s+to\s+)?(?:earth)?[\s\D]*([0-9]{1,10}(?:,?[0-9]{3})*(?:\.\d+)?)\s*(?:km|kilometers)/i);
     const distanceKm = dist ? parseFloat(dist[1].replace(/,/g, '')) : null;
-    
-    console.log(`[TheSkyLive] obs: ${obs?.[1] || 'null'}, pred: ${pred?.[1] || 'null'}, dist: ${distanceKm || 'null'}`);
-    
-    return { 
-      url, 
-      rawSnippet: pageText.slice(0,1200), 
-      observedMag: obs ? parseFloat(obs[1]) : null, 
-      predictedMag: pred ? parseFloat(pred[1]) : null, 
-      distanceKm 
-    };
+    return { url, rawSnippet: pageText.slice(0,1200), observedMag: obs?parseFloat(obs[1]):null, predictedMag: pred?parseFloat(pred[1]):null, distanceKm };
   }catch(e){
-    console.error(`[TheSkyLive] Fetch error: ${e.toString()}`);
     return { url, error: e.toString() };
   }
 }
@@ -144,34 +106,15 @@ async function fetchCOBS(){
     const bodyText = $('body').text();
     const cometRe = /C\/?\s*2025\s*N1/gi;
     const lines = bodyText.split(/\n+/).map(s=>s.trim()).filter(Boolean);
-    let latestMag = null; 
-    let note = null;
-    
-    // Search for C/2025 N1 entries with magnitude values
+    let latestMag = null; let note = null;
     for (let ln of lines){
       if (cometRe.test(ln)){
-        // Try multiple magnitude extraction patterns
-        let m = ln.match(/mag\.?\s*=?\s*(\d{1,2}\.\d{1,2})/i) || 
-                 ln.match(/magnitude\s*[:\-]?\s*(\d{1,2}\.\d{1,2})/i) ||
-                 ln.match(/(\d{1,2}\.\d{1,2})/);
-        
-        if (m){ 
-          const candidateMag = parseFloat(m[1]);
-          // Validate magnitude is in reasonable range (0-18)
-          if (candidateMag >= 0 && candidateMag <= 18) {
-            latestMag = candidateMag;
-            note = ln.slice(0, 300);
-            console.log(`[COBS] Found magnitude: ${latestMag} in line: ${ln.substring(0, 100)}`);
-            break;
-          }
-        }
+        const m = ln.match(/mag\.?\s*=?\s*([0-9]{1,2}\.\d{1,2})/i) || ln.match(/([0-9]{1,2}\.\d{1,2})/);
+        if (m){ latestMag = parseFloat(m[1]); note = ln.slice(0,300); break; }
       }
     }
-    
-    console.log(`[COBS] Latest mag found: ${latestMag || 'null'}`);
     return { url, rawSnippet: bodyText.slice(0,1200), latestMag, note };
   }catch(e){
-    console.error(`[COBS] Fetch error: ${e.toString()}`);
     return { url, error: e.toString() };
   }
 }
@@ -179,7 +122,7 @@ async function fetchCOBS(){
 // Refresh job: fetch both sources and update cache
 async function refreshCache(){
   try{
-    console.log('\n=== REFRESHING CACHE ===', new Date().toISOString());
+    console.log('Refreshing cache:', new Date().toISOString());
     const [ts, cobs] = await Promise.all([fetchTheSkyLive(), fetchCOBS()]);
     cache.updated = new Date().toISOString();
     cache.raw = { theskylive: ts, cobs: cobs };
@@ -203,23 +146,20 @@ async function refreshCache(){
     cache.distanceKm = validateDistance(ts?.distanceKm) ?? null;
     cache.source = (cobs?.latestMag ? 'COBS' : (ts?.observedMag ? 'TheSkyLive(observed)' : (ts?.predictedMag ? 'TheSkyLive(predicted)' : 'none')));
     
-    console.log(`[CACHE] Latest mag: ${cache.latestMag} from ${cache.source}`);
-    console.log(`[CACHE] Observed: ${cache.observedMag}, Predicted: ${cache.predictedMag}, Distance: ${cache.distanceKm}`);
-    
     // Detect abnormal brightness: comet should get fainter (higher mag) as it recedes
     // If current magnitude is significantly brighter (lower) than previous, it's abnormal
     if(cache.previousMag !== null && cache.latestMag !== null){
       const magDiff = cache.previousMag - cache.latestMag; // positive = got brighter (abnormal)
       cache.magStatus = (magDiff > 0.3) ? 'abnormal' : 'normal'; // threshold: 0.3 magnitude units brighter
-      console.log(`[CACHE] Magnitude changed by ${magDiff.toFixed(2)} (${cache.previousMag.toFixed(2)} → ${cache.latestMag.toFixed(2)}): ${cache.magStatus}`);
+      console.log(`Magnitude changed by ${magDiff.toFixed(2)} (${cache.previousMag.toFixed(2)} → ${cache.latestMag.toFixed(2)}): ${cache.magStatus}`);
     } else {
       cache.magStatus = 'normal';
     }
     cache.previousMag = cache.latestMag;
     
-    console.log('=== CACHE UPDATE COMPLETE ===\n');
+    console.log('Cache updated:', cache);
   }catch(e){
-    console.error('[CACHE] refreshCache failed', e);
+    console.error('refreshCache failed', e);
   }
 }
 
