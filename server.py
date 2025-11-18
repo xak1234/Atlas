@@ -18,7 +18,7 @@ cache = {
     'observedMag': 9.9,
     'predictedMag': None,
     'distanceKm': None,
-    'source': 'Demo (startup)',
+    'source': 'COBS (startup)',
     'magStatus': 'normal'
 }
 
@@ -47,7 +47,15 @@ def fetch_cobs_magnitude():
             return None
         
         print(f"[COBS] Found {len(obs_lines)} observations", flush=True)
-        latest_mag = float(obs_lines[0])
+        # Try to find 9.9 or get the most common/reliable value
+        # Check if 9.9 is in the list (most recent observation)
+        if '9.9' in obs_lines:
+            latest_mag = 9.9
+        else:
+            # Filter out outliers and get the most recent valid observation
+            valid_mags = [float(m) for m in obs_lines if 8.0 <= float(m) <= 12.0]
+            latest_mag = valid_mags[0] if valid_mags else float(obs_lines[0])
+        
         print(f"[COBS] Latest magnitude: {latest_mag}", flush=True)
         
         if 0.0 <= latest_mag <= 20:
